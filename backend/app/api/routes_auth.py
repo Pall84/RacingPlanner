@@ -186,7 +186,14 @@ async def callback(
 
 @router.get("/auth/status")
 async def status_endpoint(request: Request, db: AsyncSession = Depends(get_db)):
-    """Return the current athlete profile, or {authenticated: false} if not logged in."""
+    """Return the current athlete profile, or {authenticated: false} if not logged in.
+
+    `athlete` is the raw DB row (nulls where the user hasn't customised).
+    `settings` is the same fields merged with env defaults — the Settings
+    and Profile pages bind form inputs to `settings` so they never show
+    blanks for unset values.
+    """
+    from app.config import get_athlete_settings
     from app.security import verify_session
 
     token = request.cookies.get(SESSION_COOKIE_NAME)
@@ -199,6 +206,8 @@ async def status_endpoint(request: Request, db: AsyncSession = Depends(get_db)):
     ).scalar_one_or_none()
     if athlete is None:
         return {"authenticated": False}
+
+    effective = get_athlete_settings(athlete)
 
     return {
         "authenticated": True,
@@ -221,6 +230,13 @@ async def status_endpoint(request: Request, db: AsyncSession = Depends(get_db)):
             "trimp_gender": athlete.trimp_gender,
             "is_admin": athlete.is_admin,
             "created_at": athlete.created_at,
+        },
+        "settings": {
+            "max_hr": effective.max_hr,
+            "resting_hr": effective.resting_hr,
+            "ftp_watts": effective.ftp_watts,
+            "hr_zone_method": effective.hr_zone_method,
+            "trimp_gender": effective.trimp_gender,
         },
     }
 
