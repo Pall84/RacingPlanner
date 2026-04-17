@@ -6,7 +6,7 @@ import asyncio
 import json
 
 from sqlalchemy import select, text
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.analytics.classification_engine import classify_workout, compute_per_activity_vdot
 from app.analytics.fitness_engine import (
@@ -55,7 +55,7 @@ async def compute_metrics_for_activity(db, activity: Activity, settings) -> bool
 
     # Upsert activity_metrics
     await db.execute(
-        sqlite_insert(ActivityMetrics).values(
+        pg_insert(ActivityMetrics).values(
             activity_id=activity.id,
             avg_pace_sec_per_km=m.avg_pace_sec_per_km,
             best_pace_sec_per_km=m.best_pace_sec_per_km,
@@ -129,7 +129,7 @@ async def compute_metrics_for_activity(db, activity: Activity, settings) -> bool
     await db.execute(delete(KmSplit).where(KmSplit.activity_id == activity.id))
     for split in m.km_splits:
         await db.execute(
-            sqlite_insert(KmSplit).values(
+            pg_insert(KmSplit).values(
                 activity_id=activity.id,
                 km_index=split["km_index"],
                 distance_m=split["distance_m"],

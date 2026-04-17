@@ -358,23 +358,73 @@ async def refresh_activity_from_strava(
         # The only remaining False path is "activity no longer in our DB".
         raise HTTPException(status_code=404, detail="Activity not found in database")
 
-    # Recompute metrics with fresh stream data — use the athlete's configured
-    # HR zones / TRIMP settings, not the env defaults.
-    try:
-        from app.analytics.compute_pipeline import compute_metrics_for_activity
-        from app.config import get_athlete_settings
+    # Recompute everything downstream of the refresh so the user sees a
+    # fully-populated activity detail page in one click:
+    #   (a) per-activity metrics   — zones, TRIMP, cadence, pace, km splits
+    #   (b) workout classification  — easy/tempo/threshold/etc.
+    # Treadmill corrections are preserved upstream by refresh_activity
+    # (activity.treadmill_corrected guard + never writing corrected_* columns).
+    import logging
 
-        athlete = (
-            await db.execute(select(Athlete).where(Athlete.id == athlete_id))
-        ).scalar_one_or_none()
-        act_result = await db.execute(
-            select(Activity).where(Activity.id == activity_id)
-        )
-        activity = act_result.scalar_one_or_none()
-        if activity and activity.streams_synced and athlete:
-            await compute_metrics_for_activity(db, activity, get_athlete_settings(athlete))
-    except Exception:
-        pass  # Best-effort; user can trigger full pipeline later
+    from app.analytics.classification_engine import classify_workout
+    from app.analytics.compute_pipeline import compute_metrics_for_activity
+    from app.config import get_athlete_settings
+
+    log = logging.getLogger("racingplanner.refresh")
+
+    athlete = (
+        await db.execute(select(Athlete).where(Athlete.id == athlete_id))
+    ).scalar_one_or_none()
+    act_result = await db.execute(
+        select(Activity).where(Activity.id == activity_id)
+    )
+    activity = act_result.scalar_one_or_none()
+
+    if activity and activity.streams_synced and athlete:
+        # (a) metrics — run without swallowing errors; a DataError here is
+        # more useful surfaced (via the global exception handler) than
+        # silently leaving the activity half-refreshed.
+        await compute_metrics_for_activity(db, activity, get_athlete_settings(athlete))
+
+        # (b) classification — needs the newly-written metrics row plus
+        # recent-30 averages for this athlete to decide "long run" etc.
+        try:
+            metrics_result = await db.execute(
+                select(ActivityMetrics).where(ActivityMetrics.activity_id == activity_id)
+            )
+            metrics_row = metrics_result.scalar_one_or_none()
+
+            recent_result = await db.execute(
+                select(
+                    func.avg(Activity.moving_time),
+                    func.avg(Activity.distance),
+                ).where(Activity.athlete_id == athlete_id).limit(30)
+            )
+            avg_time, avg_dist = recent_result.one()
+
+            if metrics_row and avg_time and avg_dist:
+                workout_type = classify_workout(
+                    metrics={
+                        "z1_seconds": metrics_row.z1_seconds,
+                        "z2_seconds": metrics_row.z2_seconds,
+                        "z3_seconds": metrics_row.z3_seconds,
+                        "z4_seconds": metrics_row.z4_seconds,
+                        "z5_seconds": metrics_row.z5_seconds,
+                        "pacing_cv_pct": metrics_row.pacing_cv_pct,
+                    },
+                    activity={
+                        "name": activity.name or "",
+                        "moving_time": activity.moving_time,
+                        "distance": activity.distance,
+                    },
+                    recent_avg_duration=float(avg_time),
+                    recent_avg_distance=float(avg_dist),
+                )
+                metrics_row.workout_type = workout_type
+        except Exception as e:  # noqa: BLE001
+            # Classification failure is non-fatal — the user's metrics are
+            # already written; log and move on.
+            log.warning("classification failed for %s: %s", activity_id, e)
 
     await db.commit()
 
