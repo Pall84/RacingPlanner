@@ -385,6 +385,14 @@ class GarminDailyHealth(Base):
 
     vo2max_running = Column(Float)
 
+    # Lactate threshold — from Garmin's /latestLactateThreshold endpoint.
+    # These change slowly; populated on the most recent day of each sync
+    # (null on older rows is expected and fine).
+    lactate_threshold_speed_ms = Column(Float)   # m/s
+    lactate_threshold_hr = Column(Integer)       # bpm
+    # Endurance score — Garmin's 0-100 aerobic durability metric.
+    endurance_score = Column(Float)
+
     raw_json = Column(Text)
     updated_at = Column(BigInteger, default=lambda: int(time.time()))
 

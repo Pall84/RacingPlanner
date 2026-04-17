@@ -408,9 +408,307 @@ def _health_adjustment(health_data: dict | None) -> tuple[float, dict | None]:
     }
 
 
+# ── Lactate threshold pace ensemble method ────────────────────────────────────
+
+async def _lt_pace_predict(
+    db: AsyncSession, athlete_id: int, target_dist_m: float,
+) -> dict | None:
+    """Predict race time from Garmin's lactate threshold pace.
+
+    LT pace is the pace an athlete can sustain at their lactate threshold —
+    empirically ~45–60 min of maximal effort for well-trained runners. This
+    is a physiologically-grounded time-trial reference point that's often
+    more current than stale race PRs.
+
+    We treat LT pace as a synthetic "50-min race" and scale via Riegel:
+        T₁ = 3000 s  (50 min)
+        D₁ = T₁ × LT_speed_ms
+
+    Then standard Riegel to the target distance. This is "high" confidence
+    because Garmin calibrates LT from actual runs with HR zone patterns,
+    not extrapolated from VO2max estimates.
+
+    Staleness check: LT pace older than 30 days isn't used — the athlete
+    has likely progressed or regressed since then.
+    """
+    result = await db.execute(
+        select(GarminDailyHealth)
+        .where(
+            GarminDailyHealth.athlete_id == athlete_id,
+            GarminDailyHealth.lactate_threshold_speed_ms.isnot(None),
+        )
+        .order_by(desc(GarminDailyHealth.date))
+        .limit(1)
+    )
+    row = result.scalar_one_or_none()
+    if row is None or not row.lactate_threshold_speed_ms:
+        return None
+
+    from datetime import date as _date
+    try:
+        data_date = _date.fromisoformat(row.date)
+        days_old = (_date.today() - data_date).days
+    except Exception:
+        days_old = 999
+    if days_old > 30:
+        return None
+
+    lt_speed_ms = float(row.lactate_threshold_speed_ms)
+    if lt_speed_ms <= 0:
+        return None
+
+    # 50-min max LT effort → synthetic T₁/D₁
+    t1_sec = 50 * 60  # 3000 s
+    d1_m = lt_speed_ms * t1_sec
+
+    pred_time = riegel(t1_sec, d1_m, target_dist_m)
+    lt_pace_sec_per_km = 1000.0 / lt_speed_ms
+
+    return {
+        "time_sec": pred_time,
+        "confidence": "high",
+        "source": f"LT pace ({_fmt_pace(lt_pace_sec_per_km)}, {days_old}d old)",
+        "lt_speed_ms": lt_speed_ms,
+        "lt_pace_sec_per_km": lt_pace_sec_per_km,
+        "data_age_days": days_old,
+    }
+
+
+# ── Watch VO2max ensemble method ──────────────────────────────────────────────
+
+async def _watch_vo2max_predict(
+    db: AsyncSession, athlete_id: int, target_dist_m: float,
+) -> dict | None:
+    """Predict from Garmin's watch-computed VO2max.
+
+    Garmin calibrates VO2max per-athlete using HR + pace + grade + body metrics
+    from real runs — it's usually closer to the truth than Daniels VDOT
+    recomputed from arbitrary training runs. Used as a 4th ensemble method
+    (not a modifier), so it *replaces variance* rather than stacking a
+    correction on top of existing predictions.
+
+    We reuse `_vdot_predict`'s algebra: solve the Daniels formula at t≈240 min
+    for marathon velocity, then Riegel-scale to the target distance.
+    """
+    # Most recent Garmin VO2max within 30 days
+    result = await db.execute(
+        select(GarminDailyHealth)
+        .where(
+            GarminDailyHealth.athlete_id == athlete_id,
+            GarminDailyHealth.vo2max_running.isnot(None),
+        )
+        .order_by(desc(GarminDailyHealth.date))
+        .limit(1)
+    )
+    row = result.scalar_one_or_none()
+    if row is None or not row.vo2max_running:
+        return None
+
+    # Staleness check — VO2max from a watch fit 6 months ago is not a good
+    # predictor of current fitness.
+    from datetime import date as _date
+    try:
+        data_date = _date.fromisoformat(row.date)
+        days_old = (_date.today() - data_date).days
+    except Exception:
+        days_old = 999
+    if days_old > 30:
+        return None
+
+    vo2max = float(row.vo2max_running)
+
+    # Same marathon-velocity quadratic as _vdot_predict (see its comments).
+    a = 0.000104
+    b = 0.182258
+    c = -(4.6 + 0.8 * vo2max)
+    discriminant = b * b - 4 * a * c
+    if discriminant < 0:
+        return None
+
+    v_marathon_min = (-b + math.sqrt(discriminant)) / (2 * a)  # m/min
+    v_marathon_ms = v_marathon_min / 60.0
+    if v_marathon_ms <= 0:
+        return None
+
+    marathon_dist = 42195.0
+    marathon_time = marathon_dist / v_marathon_ms
+    pred_time = riegel(marathon_time, marathon_dist, target_dist_m)
+
+    return {
+        "time_sec": pred_time,
+        "confidence": "medium",
+        "source": f"Garmin VO2max ({vo2max:.1f})",
+        "vo2max": vo2max,
+        "data_age_days": days_old,
+    }
+
+
+# ── Long-run decoupling (marathon-specific modifier) ──────────────────────────
+
+async def _decoupling_adjustment(
+    db: AsyncSession, athlete_id: int, target_dist_m: float,
+) -> tuple[float, dict | None]:
+    """Slow down marathon+ predictions when recent long runs show heavy decoupling.
+
+    Decoupling = pace-to-HR efficiency drop from first to second half. A
+    well-trained aerobic system holds pace at stable HR; a poorly-trained one
+    loses ~5-10% efficiency in the back half. This predicts late-race blowup
+    better than any other single metric for marathon/ultra.
+
+    Gated to target_dist >= 21 km — short races don't have a "back half that
+    blows up" problem, and tempo/threshold runs are *supposed* to decouple.
+
+    Looks at the 5 most recent runs that are both:
+      - long (moving_time >= 75 min, i.e. substantial aerobic stress)
+      - workout_type in (long_run, easy, moderate) — not tempo/threshold/VO2
+    """
+    if target_dist_m < 21000:
+        return 1.0, None
+
+    from datetime import timedelta
+    cutoff = (datetime.now() - timedelta(days=60)).strftime("%Y-%m-%dT00:00:00Z")
+
+    result = await db.execute(
+        select(Activity, ActivityMetrics)
+        .join(ActivityMetrics, Activity.id == ActivityMetrics.activity_id)
+        .where(
+            Activity.athlete_id == athlete_id,
+            Activity.start_date >= cutoff,
+            Activity.moving_time >= 75 * 60,
+            ActivityMetrics.pace_decoupling_pct.isnot(None),
+            ActivityMetrics.workout_type.in_(("long_run", "easy", "moderate")),
+        )
+        .order_by(desc(Activity.start_date))
+        .limit(5)
+    )
+    rows = result.all()
+    if len(rows) < 2:
+        return 1.0, None
+
+    decouple_values = [m.pace_decoupling_pct for _, m in rows if m.pace_decoupling_pct is not None]
+    if len(decouple_values) < 2:
+        return 1.0, None
+
+    avg_decouple = sum(decouple_values) / len(decouple_values)
+
+    # Translate to pace factor. Thresholds follow training literature:
+    #   < 5%  : good aerobic durability, no penalty
+    #   5-8%  : marginal, +1%
+    #   8-12% : poor, +2%
+    #   > 12% : severe blow-up risk, +3%
+    # Capped at +3% so this modifier alone can't dominate.
+    if avg_decouple < 5:
+        adj = 0.0
+    elif avg_decouple < 8:
+        adj = 0.01
+    elif avg_decouple < 12:
+        adj = 0.02
+    else:
+        adj = 0.03
+
+    factor = 1.0 + adj
+    return factor, {
+        "avg_decoupling_pct": round(avg_decouple, 1),
+        "long_run_count": len(decouple_values),
+        "adjustment_pct": round(adj * 100, 1),
+    }
+
+
+# ── Longest-run confidence gate ───────────────────────────────────────────────
+
+async def _longest_run_confidence_widen(
+    db: AsyncSession, athlete_id: int, target_dist_m: float,
+) -> tuple[float, dict | None]:
+    """Widen the confidence range when the longest recent run is short vs target.
+
+    Returns a range-widening multiplier (>= 1.0), not a time modifier.
+    Physiologically honest: the model extrapolates less reliably the further
+    the race distance is beyond what the athlete has actually trained in.
+
+    Checks longest moving_time-weighted run in last 8 weeks:
+      - ratio >= 0.75 of target   → no widening
+      - ratio 0.5 - 0.75          → widen ±3%
+      - ratio < 0.5               → widen ±6%
+    """
+    from datetime import timedelta
+    cutoff = (datetime.now() - timedelta(days=56)).strftime("%Y-%m-%dT00:00:00Z")
+
+    result = await db.execute(
+        select(Activity.distance)
+        .where(
+            Activity.athlete_id == athlete_id,
+            Activity.start_date >= cutoff,
+            Activity.distance > 0,
+        )
+        .order_by(desc(Activity.distance))
+        .limit(1)
+    )
+    row = result.one_or_none()
+    if row is None or not row[0]:
+        return 1.0, None
+
+    longest = float(row[0])
+    ratio = longest / target_dist_m
+
+    if ratio >= 0.75:
+        widen = 1.0
+    elif ratio >= 0.5:
+        widen = 1.03
+    else:
+        widen = 1.06
+
+    return widen, {
+        "longest_run_m": round(longest, 0),
+        "ratio": round(ratio, 2),
+        "widen_pct": round((widen - 1.0) * 100, 1),
+    }
+
+
+# ── Weather adjustment (course conditions, not athlete state) ────────────────
+
+async def _apply_weather_penalty(
+    race_latlng: list, race_date: str,
+) -> tuple[float, dict | None]:
+    """Pull the race-day forecast and translate to a pace penalty.
+
+    Only fetched for races within 14 days (forecast horizon). Beyond that,
+    returns (1.0, None) — using climate averages for a specific race day is
+    less reliable than ignoring weather.
+    """
+    from datetime import date as _date
+    try:
+        rd = _date.fromisoformat(race_date[:10])
+        days_out = (rd - _date.today()).days
+    except Exception:
+        return 1.0, None
+
+    if days_out < -1 or days_out > 14:
+        # Too far out or already past → no forecast. (-1 covers same-day edge cases.)
+        return 1.0, None
+
+    from app.analytics.weather import (
+        fetch_race_weather,
+        midpoint_of_latlng,
+        weather_pace_penalty,
+    )
+    mid = midpoint_of_latlng(race_latlng)
+    if mid is None:
+        return 1.0, None
+
+    weather = await fetch_race_weather(mid[0], mid[1], race_date[:10])
+    return weather_pace_penalty(weather)
+
+
 # ── Confidence → numeric weight ───────────────────────────────────────────────
 
 _CONF_WEIGHT = {"high": 3, "medium": 2, "low": 1}
+
+# Max combined swing from all multiplicative modifiers stacked together.
+# Prevents the "perfectly tapered athlete with great sleep and low
+# decoupling" compounding case from predicting 15% faster than the
+# ensemble's raw output. ±7% is the upper end of the literature for
+# stacked form/health effects.
+_COMBINED_MODIFIER_CAP = (0.93, 1.07)
 
 
 async def predict_race_time(
@@ -420,6 +718,7 @@ async def predict_race_time(
     course_km_splits: list[dict],
     race_date: str,
     settings,
+    race_latlng: list | None = None,
 ) -> dict:
     """
     Combine three prediction methods and apply form adjustment.
@@ -443,6 +742,21 @@ async def predict_race_time(
     if vdot_result:
         methods.append({"method": "vdot", **vdot_result})
 
+    # Watch VO2max is a 4th ensemble member, not a modifier — this avoids
+    # the double-counting trap of stacking yet another multiplier on top of
+    # the existing prediction. Ensemble weight is "medium" (same as VDOT).
+    watch_result = await _watch_vo2max_predict(db, athlete_id, distance_m)
+    if watch_result:
+        methods.append({"method": "watch_vo2max", **watch_result})
+
+    # Lactate threshold pace — 5th ensemble member, "high" confidence since
+    # Garmin calibrates LT from actual HR-paced runs rather than extrapolating
+    # from an estimated VO2max. When present this tends to dominate the
+    # ensemble weighting, which is usually the right behavior for 10K+ races.
+    lt_result = await _lt_pace_predict(db, athlete_id, distance_m)
+    if lt_result:
+        methods.append({"method": "lt_pace", **lt_result})
+
     if not methods:
         return {
             "predicted_time_sec": None,
@@ -460,7 +774,26 @@ async def predict_race_time(
     tsb_factor, tsb = await _tsb_adjustment(db, athlete_id, race_date)
     health_data = await get_pre_race_health(db, athlete_id, race_date)
     health_factor, health_factors = _health_adjustment(health_data)
-    final_time = raw_time * tsb_factor * health_factor
+    decouple_factor, decouple_factors = await _decoupling_adjustment(
+        db, athlete_id, distance_m,
+    )
+
+    # Weather: fetch forecast if race is within horizon AND we have course GPS.
+    # This is a *course-conditions* factor, not an athlete-state factor, so we
+    # apply it outside the combined-modifier cap (heat effects are additive to
+    # form/health, not correlated). Still clamped to +5% internally.
+    weather_factor, weather_info = 1.0, None
+    if race_latlng:
+        weather_factor, weather_info = await _apply_weather_penalty(race_latlng, race_date)
+
+    # Combine athlete-state factors, then clamp cumulative swing.
+    # TSB + health + decoupling can compound to ±10% if uncapped; physiological
+    # literature tops out around ±7% for form/health stacked, so we clamp there.
+    # Weather is applied separately since it's a course condition, not athlete state.
+    combined = tsb_factor * health_factor * decouple_factor
+    combined = max(_COMBINED_MODIFIER_CAP[0], min(_COMBINED_MODIFIER_CAP[1], combined))
+
+    final_time = raw_time * combined * weather_factor
     final_pace = final_time / (distance_m / 1000)
 
     # Add formatted strings to breakdown for display
@@ -487,6 +820,17 @@ async def predict_race_time(
         mid = (range_low + range_high) / 2
         range_low = mid + (range_low - mid) * shrink
         range_high = mid + (range_high - mid) * shrink
+
+    # Widen if the athlete hasn't trained near the target distance. This is a
+    # *range* change, not a time change — the ensemble's point estimate may
+    # still be correct, we're just less certain.
+    widen_factor, widen_info = await _longest_run_confidence_widen(
+        db, athlete_id, distance_m,
+    )
+    if widen_factor > 1.0:
+        mid = (range_low + range_high) / 2
+        range_low = mid - (mid - range_low) * widen_factor
+        range_high = mid + (range_high - mid) * widen_factor
 
     # Data quality assessment
     sim_run_count = 0
@@ -527,6 +871,19 @@ async def predict_race_time(
         "health_adjustment_pct": round((health_factor - 1.0) * 100, 1),
         "health_factors": health_factors,
         "health_data_available": health_data is not None,
+        "decoupling_adjustment_factor": decouple_factor,
+        "decoupling_adjustment_pct": round((decouple_factor - 1.0) * 100, 1),
+        "decoupling_factors": decouple_factors,
+        "weather_adjustment_factor": weather_factor,
+        "weather_adjustment_pct": round((weather_factor - 1.0) * 100, 1),
+        "weather_info": weather_info,
+        "combined_modifier_factor": combined,
+        "combined_modifier_pct": round((combined - 1.0) * 100, 1),
+        "combined_modifier_capped": not (
+            _COMBINED_MODIFIER_CAP[0] < tsb_factor * health_factor * decouple_factor < _COMBINED_MODIFIER_CAP[1]
+        ),
+        "confidence_widen_factor": widen_factor,
+        "confidence_widen_info": widen_info,
         "range_low_sec": range_low,
         "range_high_sec": range_high,
         "range_low_str": _fmt_time(range_low),

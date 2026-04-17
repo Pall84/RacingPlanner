@@ -97,6 +97,7 @@ async def _run_prediction(db: AsyncSession, race: Race, athlete_id: int, strateg
 
     settings = get_settings()
     km_splits = json.loads(race.course_km_splits_json) if race.course_km_splits_json else []
+    latlng = json.loads(race.latlng_json) if race.latlng_json else None
     strat = strategy or race.plan_strategy or "even"
 
     pred = await predict_race_time(
@@ -106,6 +107,7 @@ async def _run_prediction(db: AsyncSession, race: Race, athlete_id: int, strateg
         course_km_splits=km_splits,
         race_date=race.date,
         settings=settings,
+        race_latlng=latlng,
     )
 
     race.predicted_time_sec = pred.get("predicted_time_sec")

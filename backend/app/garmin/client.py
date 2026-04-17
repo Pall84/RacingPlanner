@@ -77,6 +77,18 @@ class GarminClient:
     async def get_stress_data(self, date_str: str) -> dict:
         return await asyncio.to_thread(self._ensure_client().get_stress_data, date_str)
 
+    async def get_lactate_threshold(self) -> dict:
+        """Most recent lactate threshold — HR + pace + power."""
+        return await asyncio.to_thread(
+            self._ensure_client().get_lactate_threshold, latest=True
+        )
+
+    async def get_endurance_score(self, date_str: str) -> dict:
+        """Garmin's 0–100 endurance score for a given date."""
+        return await asyncio.to_thread(
+            self._ensure_client().get_endurance_score, date_str
+        )
+
     @staticmethod
     def clear_tokens_for(athlete_id: int) -> None:
         """Remove cached tokens for one athlete — used on disconnect."""

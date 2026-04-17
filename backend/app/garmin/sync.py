@@ -284,6 +284,58 @@ async def sync_garmin_health(
         if offset % 3 == 0:
             await emit(f"  Garmin health: {offset + 1}/{days} days")
 
+    # ─ Slow-changing physiology: lactate threshold + endurance score ────────
+    # These update weekly at best, so we fetch once (latest-only) and write
+    # to today's row. Each call is independently wrapped so a Garmin endpoint
+    # deprecation doesn't break the whole sync.
+    lt_speed = None
+    lt_hr = None
+    endurance = None
+
+    try:
+        lt_raw = await client.get_lactate_threshold()
+        shr = (lt_raw or {}).get("speed_and_heart_rate") or {}
+        lt_speed = shr.get("speed")               # m/s
+        lt_hr = shr.get("heartRate") or shr.get("hearRate")  # Garmin's legacy typo
+    except Exception as e:
+        await emit(f"  LT threshold skipped: {type(e).__name__}")
+    await asyncio.sleep(0.3)
+
+    today_str = today.isoformat()
+    try:
+        es_raw = await client.get_endurance_score(today_str)
+        if isinstance(es_raw, dict):
+            # Field name varies across library versions — try the obvious ones.
+            endurance = (
+                es_raw.get("overallScore")
+                or es_raw.get("enduranceScore")
+                or es_raw.get("score")
+            )
+    except Exception as e:
+        await emit(f"  Endurance score skipped: {type(e).__name__}")
+
+    if lt_speed is not None or lt_hr is not None or endurance is not None:
+        now = int(time.time())
+        await db.execute(text("""
+            INSERT INTO garmin_daily_health
+                (date, athlete_id, lactate_threshold_speed_ms,
+                 lactate_threshold_hr, endurance_score, updated_at)
+            VALUES
+                (:date, :athlete_id, :lt_speed, :lt_hr, :endurance, :updated_at)
+            ON CONFLICT(date, athlete_id) DO UPDATE SET
+                lactate_threshold_speed_ms = COALESCE(excluded.lactate_threshold_speed_ms, garmin_daily_health.lactate_threshold_speed_ms),
+                lactate_threshold_hr = COALESCE(excluded.lactate_threshold_hr, garmin_daily_health.lactate_threshold_hr),
+                endurance_score = COALESCE(excluded.endurance_score, garmin_daily_health.endurance_score),
+                updated_at = excluded.updated_at
+        """), {
+            "date": today_str,
+            "athlete_id": athlete_id,
+            "lt_speed": float(lt_speed) if lt_speed is not None else None,
+            "lt_hr": _int_or_none(lt_hr),
+            "endurance": float(endurance) if endurance is not None else None,
+            "updated_at": now,
+        })
+
     # Update credentials
     cred.last_sync_date = today.isoformat()
     cred.last_error = None
