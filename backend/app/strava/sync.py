@@ -321,11 +321,28 @@ async def sync_all_pending_streams(db, athlete_id: int, progress_queue=None):
     if progress_queue:
         await progress_queue.put(f"Downloading streams for {len(pending_ids)} activities...")
 
+    # Each concurrent task MUST open its own session. SQLAlchemy AsyncSession
+    # is not safe for concurrent use — sharing one across asyncio.gather tasks
+    # corrupts its internal state and orphans the underlying Postgres
+    # connection (which then logs "connection not checked in" when GC'd).
+    from app.database import SessionLocal
+
     semaphore = asyncio.Semaphore(3)
 
     async def _sync_one(activity_id: int):
         async with semaphore:
-            await sync_streams(db, activity_id, athlete_id, progress_queue)
+            async with SessionLocal() as own_db:
+                try:
+                    await sync_streams(own_db, activity_id, athlete_id, progress_queue)
+                    await own_db.commit()
+                except Exception as e:
+                    await own_db.rollback()
+                    if progress_queue:
+                        await progress_queue.put(f"Stream error for {activity_id}: {e}")
             await asyncio.sleep(0.2)
 
-    await asyncio.gather(*[_sync_one(aid) for aid in pending_ids])
+    # return_exceptions=True: one bad activity shouldn't abort the whole batch.
+    await asyncio.gather(
+        *[_sync_one(aid) for aid in pending_ids],
+        return_exceptions=True,
+    )
