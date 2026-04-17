@@ -185,11 +185,10 @@ async def refresh_activity(db, activity_id: int, athlete_id: int) -> bool:
     token = await get_valid_token(db, athlete_id)
     client = StravaClient(token, athlete_id)
 
-    # Fetch detailed activity from Strava
-    try:
-        raw = await client.get_activity(activity_id)
-    except Exception:
-        return False
+    # Fetch detailed activity from Strava. We let specific errors bubble up
+    # so the route handler can translate them to useful HTTP responses;
+    # only return False for "activity doesn't exist in our DB" below.
+    raw = await client.get_activity(activity_id)
 
     act_result = await db.execute(
         select(Activity).where(Activity.id == activity_id, Activity.athlete_id == athlete_id)
