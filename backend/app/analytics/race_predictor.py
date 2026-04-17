@@ -453,22 +453,32 @@ async def _lt_pace_predict(
     if days_old > 30:
         return None
 
-    lt_speed_ms = float(row.lactate_threshold_speed_ms)
-    if lt_speed_ms <= 0:
+    # Garmin returns LT "speed" as seconds per meter (a pace-like quantity,
+    # matching how Garmin Connect's UI displays LT pace). Despite the API
+    # field name and our column name ending in "_ms", it is NOT meters per
+    # second. A value of 0.35 = 0.35 sec/m = 5:50/km; a value of 5.0 would
+    # be nonsense (0.2 m/s = walking). The column name is kept for backward
+    # compat with already-synced rows; it's reinterpreted here.
+    lt_sec_per_m = float(row.lactate_threshold_speed_ms)
+
+    # Sanity range: 0.12 s/m ≈ 2:00/km (faster than world-record 5K pace)
+    #               0.60 s/m ≈ 10:00/km (slow jog — below meaningful LT)
+    if lt_sec_per_m < 0.12 or lt_sec_per_m > 0.60:
         return None
 
-    # 50-min max LT effort → synthetic T₁/D₁
-    t1_sec = 50 * 60  # 3000 s
-    d1_m = lt_speed_ms * t1_sec
+    lt_pace_sec_per_km = lt_sec_per_m * 1000.0
+
+    # Synthetic 50-min max LT effort: T₁ = 3000s, D₁ = T₁ / pace
+    t1_sec = 50 * 60
+    d1_m = t1_sec / lt_sec_per_m
 
     pred_time = riegel(t1_sec, d1_m, target_dist_m)
-    lt_pace_sec_per_km = 1000.0 / lt_speed_ms
 
     return {
         "time_sec": pred_time,
         "confidence": "high",
         "source": f"LT pace ({_fmt_pace(lt_pace_sec_per_km)}, {days_old}d old)",
-        "lt_speed_ms": lt_speed_ms,
+        "lt_sec_per_m": lt_sec_per_m,
         "lt_pace_sec_per_km": lt_pace_sec_per_km,
         "data_age_days": days_old,
     }

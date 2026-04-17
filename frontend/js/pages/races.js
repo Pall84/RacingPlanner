@@ -918,12 +918,20 @@ function buildAnalysisTab(race) {
     return `<div style="color:#f87171;padding:2rem 0">${bd.error}</div>`;
   }
 
+  const methodLabel = {
+    riegel: "Riegel Scaling",
+    simulation: "Course Simulation",
+    vdot: "VDOT Estimate",
+    watch_vo2max: "Garmin VO2max",
+    lt_pace: "Lactate Threshold Pace",
+  };
   const methodCards = methods.map((m) => {
     const confColor = { high: "#4ade80", medium: "#facc15", low: "#f87171" }[m.confidence] || "#8892a4";
+    const label = methodLabel[m.method] || m.method || "Prediction";
     return `
       <div style="background:#161b2e;border-radius:8px;padding:1rem;border-left:3px solid ${confColor}">
         <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:0.4rem">
-          <span style="font-weight:500;color:#e2e8f0;text-transform:capitalize">${m.method === "vdot" ? "VDOT Estimate" : m.method === "simulation" ? "Course Simulation" : "Riegel Scaling"}</span>
+          <span style="font-weight:500;color:#e2e8f0">${label}</span>
           <span style="font-size:1.1rem;color:#4f7cff;font-variant-numeric:tabular-nums">${m.time_str || "–"}</span>
         </div>
         <div style="font-size:0.8rem;color:#8892a4">${m.source || ""}</div>
