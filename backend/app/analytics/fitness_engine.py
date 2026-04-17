@@ -63,15 +63,19 @@ async def rebuild_daily_fitness(db, athlete_id: int):
         atl = atl + k_atl * (daily_rss - atl)
 
         await db.execute(
+            # Composite PK on (date, athlete_id) — must be listed in conflict
+            # target. Postgres upsert syntax: EXCLUDED refers to the row that
+            # would have been inserted. `extract(epoch from now())` is the
+            # Postgres equivalent of SQLite's `strftime('%s','now')`.
             text("""
                 INSERT INTO daily_fitness (date, athlete_id, daily_rss, ctl, atl, tsb)
                 VALUES (:date, :athlete_id, :daily_rss, :ctl, :atl, :tsb)
-                ON CONFLICT(date) DO UPDATE SET
+                ON CONFLICT(date, athlete_id) DO UPDATE SET
                     daily_rss = excluded.daily_rss,
                     ctl = excluded.ctl,
                     atl = excluded.atl,
                     tsb = excluded.tsb,
-                    updated_at = strftime('%s','now')
+                    updated_at = extract(epoch from now())::bigint
             """),
             {
                 "date": current.isoformat(),

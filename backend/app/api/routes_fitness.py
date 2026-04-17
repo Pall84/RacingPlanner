@@ -81,11 +81,13 @@ async def get_weekly(
     )
     rows = result.scalars().all()
 
-    # Batch-fetch Garmin weekly averages
+    # Batch-fetch Garmin weekly averages.
+    # Postgres equivalent of SQLite's `date(x, 'weekday 0', '-6 days')`:
+    # date_trunc('week', ...) returns the Monday 00:00 of that week.
     garmin_result = await db.execute(
         text("""
             SELECT
-                date(garmin_daily_health.date, 'weekday 0', '-6 days') as week_start,
+                to_char(date_trunc('week', (garmin_daily_health.date)::date), 'YYYY-MM-DD') as week_start,
                 AVG(CASE WHEN sleep_duration_sec IS NOT NULL THEN sleep_duration_sec / 3600.0 END) as avg_sleep,
                 AVG(resting_hr) as avg_rhr
             FROM garmin_daily_health
@@ -94,7 +96,13 @@ async def get_weekly(
         """),
         {"aid": athlete_id, "start": start},
     )
-    garmin_weekly = {r[0]: {"avg_sleep_hours": round(r[1], 1) if r[1] else None, "avg_resting_hr": round(r[2], 0) if r[2] else None} for r in garmin_result.fetchall()}
+    garmin_weekly = {
+        r[0]: {
+            "avg_sleep_hours": round(r[1], 1) if r[1] else None,
+            "avg_resting_hr": round(r[2], 0) if r[2] else None,
+        }
+        for r in garmin_result.fetchall()
+    }
 
     return [
         {
