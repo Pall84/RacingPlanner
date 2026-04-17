@@ -2,7 +2,7 @@ import json
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
@@ -394,11 +394,23 @@ async def refresh_activity_from_strava(
             )
             metrics_row = metrics_result.scalar_one_or_none()
 
+            # Average over the *last 30* activities — `.limit(30)` on a bare
+            # aggregate select is a no-op (a GROUP-BY-less aggregate returns
+            # one row), which would average the athlete's entire history.
+            # Use a subquery to actually slice the 30 most recent runs first.
             recent_result = await db.execute(
-                select(
-                    func.avg(Activity.moving_time),
-                    func.avg(Activity.distance),
-                ).where(Activity.athlete_id == athlete_id).limit(30)
+                text("""
+                    SELECT AVG(moving_time), AVG(distance)
+                    FROM (
+                        SELECT moving_time, distance FROM activities
+                        WHERE athlete_id = :aid
+                          AND moving_time > 0
+                          AND distance > 0
+                        ORDER BY start_date DESC
+                        LIMIT 30
+                    ) AS recent30
+                """),
+                {"aid": athlete_id},
             )
             avg_time, avg_dist = recent_result.one()
 

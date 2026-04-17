@@ -251,7 +251,7 @@ async def run_full_pipeline(
                 SELECT moving_time, distance FROM activities
                 WHERE athlete_id = :aid AND moving_time > 0 AND distance > 0
                 ORDER BY start_date DESC LIMIT 30
-            )
+            ) AS recent30
         """),
         {"aid": athlete_id},
     )

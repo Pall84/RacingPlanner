@@ -99,14 +99,21 @@ async def progress_stream(request: Request):
         _progress_queues[athlete_id] = q
 
     async def event_generator():
-        while True:
-            try:
-                msg = await asyncio.wait_for(q.get(), timeout=30)
-                yield f"data: {msg}\n\n"
-                if msg == "DONE":
-                    break
-            except TimeoutError:
-                yield ": keepalive\n\n"
+        try:
+            while True:
+                try:
+                    msg = await asyncio.wait_for(q.get(), timeout=30)
+                    yield f"data: {msg}\n\n"
+                    if msg == "DONE":
+                        break
+                except TimeoutError:
+                    yield ": keepalive\n\n"
+        finally:
+            # Drop the queue from the registry so it doesn't leak across
+            # sync runs. If a new run has already replaced it (unlikely, but
+            # possible on reconnect), leave the newer queue alone.
+            if _progress_queues.get(athlete_id) is q:
+                _progress_queues.pop(athlete_id, None)
 
     return StreamingResponse(
         event_generator(),

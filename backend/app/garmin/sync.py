@@ -18,6 +18,21 @@ from app.models.schema import Athlete, GarminCredentials, GarminDailyHealth
 # These extract the fields we care about, returning {} on unexpected shapes.
 # ---------------------------------------------------------------------------
 
+def _int_or_none(v):
+    """Coerce a value to int for Integer DB columns.
+
+    Garmin occasionally returns floats (e.g. 62.0) where an Integer column is
+    expected — asyncpg rejects that with `invalid input for query argument`.
+    Truthy-cast here so any numeric-ish value becomes a clean int, and anything
+    else becomes None.
+    """
+    if v is None:
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
 def _parse_heart_rates(data: dict) -> dict:
     if not isinstance(data, dict):
         return {}
@@ -247,17 +262,17 @@ async def sync_garmin_health(
             "hrv_weekly_avg": merged.get("hrv_weekly_avg"),
             "hrv_last_night": merged.get("hrv_last_night"),
             "hrv_status": merged.get("hrv_status"),
-            "sleep_duration_sec": merged.get("sleep_duration_sec"),
+            "sleep_duration_sec": _int_or_none(merged.get("sleep_duration_sec")),
             "sleep_score": merged.get("sleep_score"),
-            "sleep_deep_sec": merged.get("sleep_deep_sec"),
-            "sleep_light_sec": merged.get("sleep_light_sec"),
-            "sleep_rem_sec": merged.get("sleep_rem_sec"),
-            "sleep_awake_sec": merged.get("sleep_awake_sec"),
-            "resting_hr": merged.get("resting_hr"),
-            "body_battery_high": merged.get("body_battery_high"),
-            "body_battery_low": merged.get("body_battery_low"),
-            "body_battery_latest": merged.get("body_battery_latest"),
-            "stress_avg": merged.get("stress_avg"),
+            "sleep_deep_sec": _int_or_none(merged.get("sleep_deep_sec")),
+            "sleep_light_sec": _int_or_none(merged.get("sleep_light_sec")),
+            "sleep_rem_sec": _int_or_none(merged.get("sleep_rem_sec")),
+            "sleep_awake_sec": _int_or_none(merged.get("sleep_awake_sec")),
+            "resting_hr": _int_or_none(merged.get("resting_hr")),
+            "body_battery_high": _int_or_none(merged.get("body_battery_high")),
+            "body_battery_low": _int_or_none(merged.get("body_battery_low")),
+            "body_battery_latest": _int_or_none(merged.get("body_battery_latest")),
+            "stress_avg": _int_or_none(merged.get("stress_avg")),
             "training_readiness": merged.get("training_readiness"),
             "training_status": merged.get("training_status"),
             "vo2max_running": merged.get("vo2max_running"),

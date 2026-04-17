@@ -15,7 +15,7 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_athlete, get_db
@@ -60,8 +60,12 @@ async def login(request: Request, invite: str | None = None):
     return RedirectResponse(url=url)
 
 
-async def _ensure_invite_claimable(db: AsyncSession, code: str) -> Invite:
-    """Return the invite row if the code is valid, unused, and not expired."""
+async def _validate_invite_or_403(db: AsyncSession, code: str) -> None:
+    """Raise 403 if the invite code doesn't exist, is already used, or expired.
+
+    This is only a *pre-check* for a nicer error message. The actual claim
+    happens atomically via `_claim_invite_or_403` to prevent double-use races.
+    """
     result = await db.execute(select(Invite).where(Invite.code == code))
     invite = result.scalar_one_or_none()
     now = int(time.time())
@@ -71,7 +75,23 @@ async def _ensure_invite_claimable(db: AsyncSession, code: str) -> Invite:
         or (invite.expires_at is not None and invite.expires_at < now)
     ):
         raise HTTPException(status_code=403, detail="Invalid or expired invite code")
-    return invite
+
+
+async def _claim_invite_or_403(db: AsyncSession, code: str, athlete_id: int, now: int) -> None:
+    """Atomically mark the invite as used. 403 if someone else already claimed it.
+
+    The WHERE clause enforces "only claim if still unused (and not expired)" at the
+    SQL level, so two concurrent signups with the same code can never both succeed.
+    """
+    result = await db.execute(
+        update(Invite)
+        .where(Invite.code == code)
+        .where(Invite.used_by_athlete_id.is_(None))
+        .where((Invite.expires_at.is_(None)) | (Invite.expires_at >= now))
+        .values(used_by_athlete_id=athlete_id, used_at=now)
+    )
+    if result.rowcount == 0:
+        raise HTTPException(status_code=403, detail="Invite already used or expired")
 
 
 def _is_admin_bootstrap(strava_athlete_id: int) -> bool:
@@ -121,14 +141,14 @@ async def callback(
         admin_bootstrap = _is_admin_bootstrap(int(strava_id))
         invite_code = state_payload.get("invite")
 
-        invite_row: Invite | None = None
         if not admin_bootstrap:
             if not invite_code:
                 raise HTTPException(
                     status_code=403,
                     detail="Signup requires an invite. Ask the admin for a link.",
                 )
-            invite_row = await _ensure_invite_claimable(db, invite_code)
+            # Friendly pre-check (distinguishes "bad code" from "already used").
+            await _validate_invite_or_403(db, invite_code)
 
         profile_pic = (
             athlete_data.get("profile_medium")
@@ -156,10 +176,10 @@ async def callback(
         )
         db.add(athlete)
 
-        if invite_row is not None:
-            # Claim the invite transactionally in the same flush as athlete creation.
-            invite_row.used_by_athlete_id = int(strava_id)
-            invite_row.used_at = now
+        if not admin_bootstrap and invite_code:
+            # Atomic claim: only succeeds if the invite is still unused.
+            # If two signups race on the same code, only one wins here.
+            await _claim_invite_or_403(db, invite_code, int(strava_id), now)
 
         try:
             await db.commit()
