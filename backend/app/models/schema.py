@@ -257,7 +257,7 @@ class Lap(Base):
     total_elevation_gain = Column(Float)
     pace_sec_per_km = Column(Float)
     gap_sec_per_km = Column(Float)
-    split_type = Column(Text)
+    split_type = Column(Integer)  # Strava's km-split index (1,2,3,…); int in their API
 
     corrected_distance = Column(Float)
     corrected_elevation_gain = Column(Float)
