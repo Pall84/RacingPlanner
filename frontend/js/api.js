@@ -45,7 +45,8 @@ export const api = {
     listUsers: () => api.get("/api/admin/users"),
   },
   activities: {
-    list: (limit = 50, offset = 0) => api.get(`/api/activities?limit=${limit}&offset=${offset}`),
+    list: (limit = 50, offset = 0, racesOnly = false) =>
+      api.get(`/api/activities?limit=${limit}&offset=${offset}${racesOnly ? "&races_only=true" : ""}`),
     get: (id) => api.get(`/api/activities/${id}`),
     streams: (id) => api.get(`/api/activities/${id}/streams`),
     kmSplits: (id) => api.get(`/api/activities/${id}/km_splits`),
@@ -56,6 +57,7 @@ export const api = {
     refresh: (id) => api.post(`/api/activities/${id}/refresh`, {}),
     similar: (id) => api.get(`/api/activities/${id}/similar`),
     recoveryContext: (id) => api.get(`/api/activities/${id}/recovery_context`),
+    setRaceFlag: (id, isRace) => api.patch(`/api/activities/${id}/race_flag`, { is_race: isRace }),
   },
   fitness: {
     ctlAtlTsb: (start, end) => api.get(`/api/fitness/ctl_atl_tsb${start ? `?start=${start}&end=${end}` : ""}`),

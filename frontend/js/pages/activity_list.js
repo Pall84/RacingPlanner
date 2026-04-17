@@ -17,10 +17,13 @@ function fmtTime(sec) {
 }
 
 function rowHtml(a) {
+  const raceBadge = a.is_race
+    ? `<span class="badge" style="background:#3b1f1f;color:#f87171;border:1px solid #5a2a2a;margin-left:6px;font-size:10px">🏁 RACE</span>`
+    : "";
   return `
     <tr onclick="navigate('/activity/${a.id}')">
       <td class="muted">${(a.start_date_local || a.start_date || "").slice(0, 10)}</td>
-      <td>${a.name || "Run"}</td>
+      <td>${a.name || "Run"}${raceBadge}</td>
       <td><span class="badge badge-blue">${a.type || "Run"}</span></td>
       <td>${fmtDist(a.distance_m)}</td>
       <td>${fmtTime(a.moving_time)}</td>
@@ -37,7 +40,13 @@ export async function render(container) {
   container.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
       <h1 class="page-title" style="margin:0">Activities</h1>
-      <button class="btn btn-primary" id="btn-sync-new">Sync New</button>
+      <div style="display:flex;gap:12px;align-items:center">
+        <div class="filter-group" style="display:inline-flex;background:#1e2235;border:1px solid #2e3348;border-radius:6px;overflow:hidden">
+          <button class="filter-btn" data-filter="all" style="padding:6px 14px;background:#2e3348;border:none;color:#e2e8f0;cursor:pointer;font-size:13px">All</button>
+          <button class="filter-btn" data-filter="races" style="padding:6px 14px;background:transparent;border:none;color:#8892a4;cursor:pointer;font-size:13px">🏁 Races only</button>
+        </div>
+        <button class="btn btn-primary" id="btn-sync-new">Sync New</button>
+      </div>
     </div>
 
     <div class="table-section">
@@ -69,6 +78,7 @@ export async function render(container) {
     loading: false,
     done: false,
     observer: null,
+    racesOnly: false,
   };
 
   async function loadNextPage() {
@@ -77,7 +87,7 @@ export async function render(container) {
     sentinel.textContent = "Loading…";
 
     try {
-      const data = await api.activities.list(PAGE_SIZE, state.offset);
+      const data = await api.activities.list(PAGE_SIZE, state.offset, state.racesOnly);
       state.total = data.total;
       state.offset += data.activities.length;
 
@@ -120,6 +130,39 @@ export async function render(container) {
   // Load the first page immediately (don't wait for the observer — the sentinel
   // might already be in view on short lists).
   await loadNextPage();
+
+  // Filter toggle — resets pagination when the filter changes.
+  function resetAndReload() {
+    state.offset = 0;
+    state.total = null;
+    state.done = false;
+    tbody.innerHTML = "";
+    countEl.textContent = "";
+    if (state.observer) {
+      state.observer.disconnect();
+      state.observer = new IntersectionObserver(
+        (entries) => entries.forEach((en) => en.isIntersecting && loadNextPage()),
+        { rootMargin: "300px" }
+      );
+      state.observer.observe(sentinel);
+    }
+    loadNextPage();
+  }
+
+  container.querySelectorAll(".filter-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const wantRaces = btn.dataset.filter === "races";
+      if (wantRaces === state.racesOnly) return;  // no-op if unchanged
+      state.racesOnly = wantRaces;
+      // Visual active-state
+      container.querySelectorAll(".filter-btn").forEach((b) => {
+        const isActive = b === btn;
+        b.style.background = isActive ? "#2e3348" : "transparent";
+        b.style.color = isActive ? "#e2e8f0" : "#8892a4";
+      });
+      resetAndReload();
+    });
+  });
 
   container.querySelector("#btn-sync-new").addEventListener("click", async (e) => {
     e.target.disabled = true;

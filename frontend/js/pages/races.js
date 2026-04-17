@@ -919,6 +919,7 @@ function buildAnalysisTab(race) {
   }
 
   const methodLabel = {
+    recent_race: "Recent Race",
     riegel: "Riegel Scaling",
     simulation: "Course Simulation",
     vdot: "VDOT Estimate",

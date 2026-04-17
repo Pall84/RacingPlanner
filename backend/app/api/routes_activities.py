@@ -60,6 +60,7 @@ def _activity_row(activity: Activity, metrics: ActivityMetrics | None) -> dict:
         "map_polyline": activity.map_summary_polyline,
         "streams_synced": bool(activity.streams_synced),
         "metrics_computed": bool(activity.metrics_computed),
+        "is_race": bool(activity.is_race),
     }
     if activity.average_speed and activity.average_speed > 0:
         d["avg_pace_str"] = _pace_to_str(1000 / activity.average_speed)
@@ -116,13 +117,21 @@ async def list_activities(
     request: Request,
     limit: int = 50,
     offset: int = 0,
+    races_only: bool = False,
     db: AsyncSession = Depends(get_db),
 ):
     athlete_id = _get_athlete_id(request)
+    # Filter condition is shared between the page query and the count query
+    # so the total reflects the *filtered* set, which is what infinite scroll
+    # needs to decide whether there's more to load.
+    where_clauses = [Activity.athlete_id == athlete_id]
+    if races_only:
+        where_clauses.append(Activity.is_race == 1)
+
     result = await db.execute(
         select(Activity, ActivityMetrics)
         .outerjoin(ActivityMetrics, Activity.id == ActivityMetrics.activity_id)
-        .where(Activity.athlete_id == athlete_id)
+        .where(*where_clauses)
         .order_by(desc(Activity.start_date))
         .limit(limit)
         .offset(offset)
@@ -130,7 +139,7 @@ async def list_activities(
     rows = result.all()
 
     count_result = await db.execute(
-        select(func.count()).where(Activity.athlete_id == athlete_id)
+        select(func.count()).select_from(Activity).where(*where_clauses)
     )
     total = count_result.scalar()
 
@@ -138,6 +147,7 @@ async def list_activities(
         "total": total,
         "limit": limit,
         "offset": offset,
+        "races_only": races_only,
         "activities": [_activity_row(act, met) for act, met in rows],
     }
 
@@ -291,6 +301,40 @@ async def get_hr_zones(
         "total_seconds": total_seconds,
         "zone_thresholds": zone_thresholds,
     }
+
+
+class RaceFlagRequest(BaseModel):
+    is_race: bool
+
+
+@router.patch("/{activity_id}/race_flag")
+async def set_race_flag(
+    activity_id: int,
+    body: RaceFlagRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark/unmark an activity as a race.
+
+    The flag is preserved across Strava refresh/sync cycles — see
+    `strava/sync.py` where the upsert path only sets is_race on INSERT,
+    not on UPDATE. That way a user-marked race stays marked even if the
+    activity is re-fetched with a different name or streams.
+    """
+    athlete_id = _get_athlete_id(request)
+    result = await db.execute(
+        select(Activity).where(
+            Activity.id == activity_id,
+            Activity.athlete_id == athlete_id,
+        )
+    )
+    activity = result.scalar_one_or_none()
+    if not activity:
+        raise HTTPException(status_code=404)
+
+    activity.is_race = 1 if body.is_race else 0
+    await db.flush()
+    return {"id": activity.id, "is_race": bool(activity.is_race)}
 
 
 @router.patch("/{activity_id}/laps/{lap_index}")

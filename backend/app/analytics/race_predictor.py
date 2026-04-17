@@ -408,6 +408,94 @@ def _health_adjustment(health_data: dict | None) -> tuple[float, dict | None]:
     }
 
 
+# ── Recent race ensemble method (user-marked) ────────────────────────────────
+
+async def _recent_race_predict(
+    db: AsyncSession, athlete_id: int, target_dist_m: float,
+) -> dict | None:
+    """Predict from the athlete's most recent user-marked race.
+
+    Strong signal: a race is the athlete's ground-truth performance at that
+    distance under real race-day conditions (pacing, nutrition, competitive
+    effort). Unlike Strava PRs — which can be fast training runs labeled
+    "5k" — an `is_race` flag is explicit intent.
+
+    Selection:
+      - Last 12 months only (older races reflect prior fitness)
+      - Prefer races within ±20% of target distance (the Riegel exponent
+        stays reasonable close to the source distance)
+      - Among eligible, pick the most recent (fitness > old-race distance match)
+
+    Confidence is "high" when the distance match is close (< 20% deviation),
+    otherwise "medium". This can out-weight the Riegel-from-PRs method when
+    the PR is stale — which is usually correct.
+    """
+    from datetime import timedelta
+    cutoff = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%dT00:00:00Z")
+
+    result = await db.execute(
+        select(Activity)
+        .where(
+            Activity.athlete_id == athlete_id,
+            Activity.is_race == 1,
+            Activity.start_date >= cutoff,
+            Activity.distance > 0,
+            Activity.moving_time > 0,
+        )
+        .order_by(desc(Activity.start_date))
+        .limit(10)
+    )
+    races = result.scalars().all()
+    if not races:
+        return None
+
+    # Score each candidate: smaller distance deviation is better; recency
+    # breaks ties. Riegel gets unreliable past ~60% distance deviation, so
+    # exclude anything further out than that — better to fall back to PRs.
+    def _distance_score(r: Activity) -> float:
+        return abs(r.distance - target_dist_m) / target_dist_m
+
+    viable = [r for r in races if _distance_score(r) < 0.6]
+    if not viable:
+        return None
+
+    # Prefer close distance match unless it's >30 days stale AND a closer
+    # race is available. Beyond that, trust recency.
+    viable.sort(key=lambda r: (_distance_score(r), -_iso_timestamp(r.start_date)))
+    best = viable[0]
+
+    dev = _distance_score(best)
+    confidence = "high" if dev < 0.2 else "medium"
+
+    pred_time = riegel(float(best.moving_time), float(best.distance), target_dist_m)
+
+    race_date_short = (best.start_date or "")[:10]
+    race_dist_km = best.distance / 1000
+    race_name = (best.name or "race").strip() or "race"
+    # Truncate for the source string
+    if len(race_name) > 40:
+        race_name = race_name[:37] + "…"
+
+    return {
+        "time_sec": pred_time,
+        "confidence": confidence,
+        "source": f"Marked race: {race_name} — {race_dist_km:.1f}km in {_fmt_time(best.moving_time)} ({race_date_short})",
+        "race_activity_id": best.id,
+        "race_distance_m": best.distance,
+        "race_time_sec": best.moving_time,
+        "race_date": race_date_short,
+        "distance_deviation_pct": round(dev * 100, 1),
+    }
+
+
+def _iso_timestamp(iso_str: str) -> float:
+    """Convert a Strava ISO timestamp to a sortable float. Returns 0 on parse fail."""
+    try:
+        return datetime.fromisoformat(iso_str.replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return 0.0
+
+
 # ── Lactate threshold pace ensemble method ────────────────────────────────────
 
 async def _lt_pace_predict(
@@ -739,6 +827,13 @@ async def predict_race_time(
       tsb, tsb_adjustment_factor
     """
     methods = []
+
+    # User-marked recent race comes first — if present at similar distance
+    # it's usually the single best predictor (ground-truth race-day effort
+    # from actual current fitness, not a stale PR or a fast training run).
+    recent_race_result = await _recent_race_predict(db, athlete_id, distance_m)
+    if recent_race_result:
+        methods.append({"method": "recent_race", **recent_race_result})
 
     riegel_result = await _riegel_from_prs(db, athlete_id, distance_m)
     if riegel_result:

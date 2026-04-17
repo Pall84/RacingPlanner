@@ -51,10 +51,15 @@ export async function render(container, activityId) {
 
     <div class="activity-header" style="display:flex;justify-content:space-between;align-items:flex-start">
       <div>
-        <h1>${activity.name || "Run"}</h1>
+        <h1>${activity.name || "Run"}${activity.is_race ? ' <span style="font-size:0.65em;vertical-align:middle;background:#3b1f1f;color:#f87171;border:1px solid #5a2a2a;padding:2px 8px;border-radius:4px;margin-left:8px">🏁 RACE</span>' : ""}</h1>
         <div class="meta">${date} &nbsp;·&nbsp; ${activity.type || "Run"}${activity.workout_type ? ` &nbsp;·&nbsp; <span class="badge badge-blue">${activity.workout_type.replace(/_/g, " ")}</span>` : ""}${activity.treadmill_corrected ? ' &nbsp;·&nbsp; <span class="badge badge-yellow">treadmill corrected</span>' : ""}</div>
       </div>
-      <button class="btn btn-sm" id="refresh-activity-btn" style="margin-top:4px">↻ Refresh from Strava</button>
+      <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+        <button class="btn btn-sm" id="toggle-race-btn" title="Marking an activity as a race tells the predictor to use this performance as a ground-truth reference for future race predictions at similar distances.">
+          ${activity.is_race ? "🏁 Unmark as Race" : "🏁 Mark as Race"}
+        </button>
+        <button class="btn btn-sm" id="refresh-activity-btn">↻ Refresh from Strava</button>
+      </div>
     </div>
 
     <!-- Overview cards -->
@@ -298,6 +303,23 @@ export async function render(container, activityId) {
       btn.disabled = false;
       btn.textContent = "↻ Refresh from Strava";
       alert("Refresh failed: " + err.message);
+    }
+  });
+
+  // Toggle race flag — updates the button + re-renders so the badge appears/disappears
+  container.querySelector("#toggle-race-btn")?.addEventListener("click", async (e) => {
+    const btn = e.target.closest("button");
+    btn.disabled = true;
+    const original = btn.textContent;
+    btn.textContent = "Saving…";
+    try {
+      const next = !activity.is_race;
+      await api.activities.setRaceFlag(activityId, next);
+      await render(container, activityId);  // re-render with the updated flag
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = original;
+      alert("Could not update race flag: " + err.message);
     }
   });
 

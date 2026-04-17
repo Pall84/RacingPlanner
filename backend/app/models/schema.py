@@ -112,6 +112,11 @@ class Activity(Base):
     metrics_computed = Column(Integer, default=0)
     laps_synced = Column(Integer, default=0)
     treadmill_corrected = Column(Integer, default=0)
+    # User-marked race flag. Preserved across Strava re-sync / refresh.
+    # Treated by the predictor as ground-truth race performance at this
+    # distance — much stronger than the keyword-based auto-classification
+    # that fills ActivityMetrics.workout_type.
+    is_race = Column(Integer, default=0, nullable=False)
 
     raw_json = Column(Text)
     created_at = Column(BigInteger, default=lambda: int(time.time()))
