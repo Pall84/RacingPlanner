@@ -11,6 +11,7 @@ from app.models.schema import (
     Activity,
     ActivityMetrics,
     ActivityStream,
+    Athlete,
     GarminDailyHealth,
     KmSplit,
     Lap,
@@ -265,8 +266,15 @@ async def get_hr_zones(
             "trimp": round(trimp or 0, 2),
         }
 
-    from app.config import get_settings
-    s = get_settings()
+    # Zone thresholds must reflect the user's configured max_hr/resting_hr,
+    # not the env defaults — otherwise a user with, say, max_hr=195 sees
+    # zone boundaries that assume max_hr=190.
+    from app.config import get_athlete_settings, get_settings
+
+    athlete = (
+        await db.execute(select(Athlete).where(Athlete.id == athlete_id))
+    ).scalar_one_or_none()
+    s = get_athlete_settings(athlete) if athlete else get_settings()
     hrr = s.max_hr - s.resting_hr
     if s.hr_zone_method == "karvonen":
         zone_thresholds = [round(s.resting_hr + p * hrr) for p in (0.60, 0.70, 0.80, 0.90)]
@@ -350,16 +358,21 @@ async def refresh_activity_from_strava(
         # The only remaining False path is "activity no longer in our DB".
         raise HTTPException(status_code=404, detail="Activity not found in database")
 
-    # Recompute metrics with fresh stream data
+    # Recompute metrics with fresh stream data — use the athlete's configured
+    # HR zones / TRIMP settings, not the env defaults.
     try:
         from app.analytics.compute_pipeline import compute_metrics_for_activity
-        from app.config import get_settings
+        from app.config import get_athlete_settings
+
+        athlete = (
+            await db.execute(select(Athlete).where(Athlete.id == athlete_id))
+        ).scalar_one_or_none()
         act_result = await db.execute(
             select(Activity).where(Activity.id == activity_id)
         )
         activity = act_result.scalar_one_or_none()
-        if activity and activity.streams_synced:
-            await compute_metrics_for_activity(db, activity, get_settings())
+        if activity and activity.streams_synced and athlete:
+            await compute_metrics_for_activity(db, activity, get_athlete_settings(athlete))
     except Exception:
         pass  # Best-effort; user can trigger full pipeline later
 

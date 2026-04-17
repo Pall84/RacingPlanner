@@ -9,6 +9,7 @@ from app.api.deps import get_db
 from app.models.schema import (
     Activity,
     ActivityMetrics,
+    Athlete,
     DailyFitness,
     GarminDailyHealth,
     PersonalRecord,
@@ -192,9 +193,12 @@ async def get_vo2max(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    from app.config import get_settings
+    from app.config import get_athlete_settings, get_settings
     athlete_id = _get_athlete_id(request)
-    settings = get_settings()
+    athlete = (
+        await db.execute(select(Athlete).where(Athlete.id == athlete_id))
+    ).scalar_one_or_none()
+    settings = get_athlete_settings(athlete) if athlete else get_settings()
     vo2max = await compute_vo2max_estimate(db, athlete_id, max_hr=settings.max_hr)
     return {"estimated_vo2max": round(vo2max, 1) if vo2max else None}
 
@@ -204,10 +208,13 @@ async def get_summary(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    from app.config import get_settings
+    from app.config import get_athlete_settings, get_settings
 
     athlete_id = _get_athlete_id(request)
-    settings = get_settings()
+    athlete = (
+        await db.execute(select(Athlete).where(Athlete.id == athlete_id))
+    ).scalar_one_or_none()
+    settings = get_athlete_settings(athlete) if athlete else get_settings()
 
     # Current CTL/ATL/TSB (latest)
     fitness_result = await db.execute(
