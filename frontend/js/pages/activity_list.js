@@ -1,8 +1,6 @@
 import { api } from "../api.js";
 
 const PAGE_SIZE = 50;
-let _offset = 0;
-let _total = 0;
 
 function decouplingBadge(pct) {
   if (pct === null || pct === undefined) return "<span class='muted'>–</span>";
@@ -18,12 +16,8 @@ function fmtTime(sec) {
   return h > 0 ? `${h}h ${m}m` : `${m} min`;
 }
 
-async function loadPage(container, offset) {
-  _offset = offset;
-  const data = await api.activities.list(PAGE_SIZE, offset);
-  _total = data.total;
-
-  const rows = data.activities.map((a) => `
+function rowHtml(a) {
+  return `
     <tr onclick="navigate('/activity/${a.id}')">
       <td class="muted">${(a.start_date_local || a.start_date || "").slice(0, 10)}</td>
       <td>${a.name || "Run"}</td>
@@ -36,15 +30,7 @@ async function loadPage(container, offset) {
       <td>${a.trimp ? a.trimp.toFixed(1) : "–"}</td>
       <td>${decouplingBadge(a.pace_decoupling_pct)}</td>
     </tr>
-  `).join("");
-
-  const startItem = offset + 1;
-  const endItem = Math.min(offset + PAGE_SIZE, _total);
-
-  container.querySelector("#activities-tbody").innerHTML = rows || `<tr><td colspan="10" class="muted" style="text-align:center;padding:24px">No activities found</td></tr>`;
-  container.querySelector("#pagination-info").textContent = `${startItem}–${endItem} of ${_total}`;
-  container.querySelector("#btn-prev").disabled = offset === 0;
-  container.querySelector("#btn-next").disabled = offset + PAGE_SIZE >= _total;
+  `;
 }
 
 export async function render(container) {
@@ -62,28 +48,111 @@ export async function render(container) {
             <th>Pace</th><th>HR</th><th>Cadence</th><th>TRIMP</th><th>Decouple</th>
           </tr>
         </thead>
-        <tbody id="activities-tbody">
-          <tr><td colspan="10" class="muted" style="text-align:center;padding:24px">Loading...</td></tr>
-        </tbody>
+        <tbody id="activities-tbody"></tbody>
       </table>
-      <div class="pagination">
-        <button id="btn-prev" disabled>← Prev</button>
-        <span id="pagination-info">–</span>
-        <button id="btn-next" disabled>Next →</button>
+      <div id="scroll-sentinel" style="padding:16px;text-align:center;color:var(--muted);font-size:13px">
+        Loading…
       </div>
+      <div id="scroll-count" style="padding:8px;text-align:center;color:var(--muted);font-size:12px"></div>
     </div>
   `;
 
-  await loadPage(container, 0);
+  const tbody = container.querySelector("#activities-tbody");
+  const sentinel = container.querySelector("#scroll-sentinel");
+  const countEl = container.querySelector("#scroll-count");
 
-  container.querySelector("#btn-prev").addEventListener("click", () => loadPage(container, _offset - PAGE_SIZE));
-  container.querySelector("#btn-next").addEventListener("click", () => loadPage(container, _offset + PAGE_SIZE));
+  // Closure-scoped state — fresh each time the page mounts. No module-level
+  // state means that navigating away and back doesn't keep stale data.
+  const state = {
+    offset: 0,
+    total: null,       // null until first page returns
+    loading: false,
+    done: false,
+    observer: null,
+  };
+
+  async function loadNextPage() {
+    if (state.loading || state.done) return;
+    state.loading = true;
+    sentinel.textContent = "Loading…";
+
+    try {
+      const data = await api.activities.list(PAGE_SIZE, state.offset);
+      state.total = data.total;
+      state.offset += data.activities.length;
+
+      if (data.activities.length > 0) {
+        tbody.insertAdjacentHTML("beforeend", data.activities.map(rowHtml).join(""));
+      } else if (state.offset === 0) {
+        tbody.innerHTML = `<tr><td colspan="10" class="muted" style="text-align:center;padding:24px">No activities yet. Hit "Sync New" to pull from Strava.</td></tr>`;
+      }
+
+      countEl.textContent = `Showing ${state.offset} of ${state.total}`;
+
+      if (state.offset >= state.total || data.activities.length === 0) {
+        state.done = true;
+        sentinel.textContent = state.total > 0 ? "— end of list —" : "";
+        if (state.observer) state.observer.disconnect();
+      } else {
+        sentinel.textContent = "";  // will be replaced by observer firing next
+      }
+    } catch (e) {
+      sentinel.textContent = `Load failed: ${e.message}. Scroll to retry.`;
+      // Allow retry on next scroll trigger.
+    } finally {
+      state.loading = false;
+    }
+  }
+
+  // IntersectionObserver fires `loadNextPage` whenever the sentinel enters the
+  // viewport. rootMargin lets us pre-load 300px before the sentinel is actually
+  // visible, so the user rarely sees a "Loading…" flash.
+  state.observer = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) loadNextPage();
+      }
+    },
+    { rootMargin: "300px" }
+  );
+  state.observer.observe(sentinel);
+
+  // Load the first page immediately (don't wait for the observer — the sentinel
+  // might already be in view on short lists).
+  await loadNextPage();
 
   container.querySelector("#btn-sync-new").addEventListener("click", async (e) => {
     e.target.disabled = true;
-    e.target.textContent = "Syncing...";
-    await api.activities.sync();
-    setTimeout(() => loadPage(container, 0), 2000);
-    setTimeout(() => { e.target.disabled = false; e.target.textContent = "Sync New"; }, 5000);
+    e.target.textContent = "Syncing…";
+    try {
+      await api.activities.sync();
+    } catch (err) {
+      alert(`Sync failed: ${err.message}`);
+      e.target.disabled = false;
+      e.target.textContent = "Sync New";
+      return;
+    }
+    // Wait a moment for the background task to start writing, then reset and
+    // reload. The sync runs asynchronously on the server; new activities will
+    // appear on subsequent reloads as the pipeline makes progress.
+    setTimeout(() => {
+      state.offset = 0;
+      state.total = null;
+      state.done = false;
+      tbody.innerHTML = "";
+      countEl.textContent = "";
+      if (!state.observer) {
+        state.observer = new IntersectionObserver(
+          (entries) => entries.forEach((en) => en.isIntersecting && loadNextPage()),
+          { rootMargin: "300px" }
+        );
+        state.observer.observe(sentinel);
+      }
+      loadNextPage();
+    }, 2000);
+    setTimeout(() => {
+      e.target.disabled = false;
+      e.target.textContent = "Sync New";
+    }, 5000);
   });
 }
