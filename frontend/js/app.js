@@ -32,11 +32,27 @@ async function loadPage(path) {
 
   try {
     const mod = await import(`./pages/${moduleName}.js`);
+    // Successful import — clear the reload guard so the next chunk failure
+    // (from a future deploy) can self-heal once.
+    sessionStorage.removeItem("rp-chunk-reload");
     const activityId = path.startsWith("/activity/") ? path.split("/").pop() : null;
     const raceId = path.startsWith("/races/") ? path.split("/").pop() : null;
     await mod.render(content, activityId || raceId);
   } catch (e) {
-    content.innerHTML = `<div class="loading-spinner" style="color:var(--red)">Error loading page: ${e.message}</div>`;
+    // Chunk-load failure after a new deploy: the hash the old index.html
+    // referenced no longer exists on Netlify. Browsers hit this whenever the
+    // user keeps a tab open across a deploy. Self-heal with one hard reload;
+    // sessionStorage gates against an infinite loop if the reload itself
+    // can't reach a working build.
+    const msg = (e && e.message) || "";
+    const isChunkError = /Failed to fetch dynamically imported module|error loading dynamically imported module|Importing a module script failed/i.test(msg);
+    if (isChunkError && !sessionStorage.getItem("rp-chunk-reload")) {
+      sessionStorage.setItem("rp-chunk-reload", "1");
+      console.warn("Stale build detected — reloading to pick up new assets");
+      location.reload();
+      return;
+    }
+    content.innerHTML = `<div class="loading-spinner" style="color:var(--red)">Error loading page: ${msg || e}</div>`;
     console.error(e);
   }
 }

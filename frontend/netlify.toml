@@ -13,3 +13,19 @@
   from = "/*"
   to = "/index.html"
   status = 200
+
+# Cache policy: hashed asset filenames (app-abc123.js) are content-addressed
+# and safe to cache forever. index.html must revalidate every time so that
+# the moment a new build ships, users get fresh asset hashes and don't try
+# to load the previous build's chunks. Without this, a user with a tab open
+# across a deploy hits "Failed to fetch dynamically imported module" when
+# their router tries to load a chunk hash that no longer exists on Netlify.
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
