@@ -431,11 +431,59 @@ function _eleAtDist(profile, distM) {
   return profile[profile.length - 1][1];
 }
 
+// Draws aid stations as vertical dashed lines with their name + available-
+// provisions icons (💧 water, 🍌 food, 🎒 bags) labelled at the top of the
+// chart. Registered per-chart so the station list can change without
+// polluting Chart.js global state.
+function _aidStationLinesPlugin(stations) {
+  return {
+    id: "aidStationLines",
+    afterDatasetsDraw(chart) {
+      if (!stations || !stations.length) return;
+      const { ctx, chartArea, scales } = chart;
+      const xScale = scales.x;
+      if (!xScale) return;
+
+      ctx.save();
+      ctx.font = "10px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "bottom";
+
+      for (const as of stations) {
+        const x = xScale.getPixelForValue(as.distance_km);
+        if (x < chartArea.left || x > chartArea.right) continue;
+
+        // Dashed vertical line (yellow)
+        ctx.strokeStyle = "#facc15";
+        ctx.lineWidth = 1.2;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(x, chartArea.top);
+        ctx.lineTo(x, chartArea.bottom);
+        ctx.stroke();
+
+        // Available-provisions icons (💧🍌🎒) — only shown if available
+        const icons = [
+          as.has_water !== false ? "💧" : "",
+          as.has_food ? "🍌" : "",
+          as.has_bags ? "🎒" : "",
+        ].filter(Boolean).join("");
+
+        // Compact label line: name + icons
+        const label = (as.name.length > 14 ? as.name.slice(0, 13) + "…" : as.name) + (icons ? " " + icons : "");
+        ctx.setLineDash([]);
+        ctx.fillStyle = "#facc15";
+        ctx.fillText(label, x, chartArea.top - 2);
+      }
+      ctx.restore();
+    },
+  };
+}
+
 export function renderElevationProfile(canvasId, elevationProfile, aidStations = []) {
   destroyIfExists(canvasId);
   if (!elevationProfile || elevationProfile.length < 2) return null;
 
-  // Use {x, y} format so aid station scatter points can be placed at precise distances
   const lineData = elevationProfile.map(([d, e]) => ({ x: d / 1000, y: e }));
   const eleValues = elevationProfile.map(([, e]) => e);
   const minEle = Math.min(...eleValues);
@@ -451,14 +499,6 @@ export function renderElevationProfile(canvasId, elevationProfile, aidStations =
   grad.addColorStop(0.5, "rgba(180, 140, 80, 0.6)");
   grad.addColorStop(1, "rgba(74, 163, 110, 0.35)");
 
-  // Aid station scatter points (interpolated elevation at each station's distance)
-  const stationScatter = aidStations.map((as) => ({
-    x: as.distance_km,
-    y: _eleAtDist(elevationProfile, as.distance_km * 1000),
-    name: as.name,
-    notes: as.notes,
-  }));
-
   return new Chart(canvas, {
     data: {
       datasets: [
@@ -472,35 +512,19 @@ export function renderElevationProfile(canvasId, elevationProfile, aidStations =
           pointRadius: 0,
           tension: 0.3,
         },
-        ...(stationScatter.length ? [{
-          type: "scatter",
-          label: "Aid Stations",
-          data: stationScatter,
-          backgroundColor: "#facc15",
-          borderColor: "#1e2235",
-          borderWidth: 1.5,
-          pointRadius: 7,
-          pointHoverRadius: 9,
-          pointStyle: "triangle",
-        }] : []),
       ],
     },
+    plugins: [_aidStationLinesPlugin(aidStations)],
     options: {
+      // Reserve padding at the top so station labels don't get clipped
+      layout: { padding: { top: aidStations.length ? 20 : 0 } },
       responsive: true,
       plugins: {
         legend: { display: false },
         tooltip: {
           callbacks: {
             title: (items) => `${items[0].parsed.x.toFixed(1)} km`,
-            label: (ctx) => {
-              if (ctx.dataset.label === "Aid Stations") {
-                const as = aidStations[ctx.dataIndex];
-                return as
-                  ? `⛺ ${as.name}${as.notes ? " — " + as.notes : ""}`
-                  : "Aid station";
-              }
-              return `${Math.round(ctx.parsed.y)} m elevation`;
-            },
+            label: (ctx) => `${Math.round(ctx.parsed.y)} m elevation`,
           },
         },
       },

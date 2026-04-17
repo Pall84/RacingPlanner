@@ -328,7 +328,9 @@ async def set_aid_stations(
     if not race:
         raise HTTPException(status_code=404)
 
-    # Validate and normalise each station
+    # Validate and normalise each station. Preserves optional fields:
+    #   lat/lon — map pin coordinates
+    #   has_water, has_food, has_bags — booleans used by the nutrition planner
     clean = []
     for s in body.stations:
         name = str(s.get("name", "")).strip()
@@ -338,11 +340,27 @@ async def set_aid_stations(
             raise HTTPException(status_code=422, detail="Each aid station must have a numeric distance_km")
         if not name:
             raise HTTPException(status_code=422, detail="Aid station name cannot be empty")
-        clean.append({
+        entry: dict = {
             "name": name,
             "distance_km": round(dist, 2),
             "notes": str(s.get("notes", "") or "").strip(),
-        })
+            # Default True for water — most race aid stations have water.
+            # User can uncheck explicitly. Food/bags default False.
+            "has_water": bool(s.get("has_water", True)),
+            "has_food": bool(s.get("has_food", False)),
+            "has_bags": bool(s.get("has_bags", False)),
+        }
+        if s.get("lat") is not None:
+            try:
+                entry["lat"] = float(s["lat"])
+            except (TypeError, ValueError):
+                pass
+        if s.get("lon") is not None:
+            try:
+                entry["lon"] = float(s["lon"])
+            except (TypeError, ValueError):
+                pass
+        clean.append(entry)
 
     # Sort by distance so they're always in course order
     clean.sort(key=lambda s: s["distance_km"])

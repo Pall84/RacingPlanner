@@ -629,6 +629,9 @@ function buildCourseTab(race) {
           <input id="as-name" placeholder="Station name" style="flex:1;min-width:120px;padding:0.4rem 0.6rem;background:#0d1117;border:1px solid #2e3348;border-radius:6px;color:#e2e8f0;font-size:0.85rem">
           <input id="as-dist" type="number" step="0.1" min="0.1" placeholder="km" style="width:80px;padding:0.4rem 0.6rem;background:#0d1117;border:1px solid #2e3348;border-radius:6px;color:#e2e8f0;font-size:0.85rem">
           <input id="as-notes" placeholder="Notes (optional)" style="flex:1;min-width:120px;padding:0.4rem 0.6rem;background:#0d1117;border:1px solid #2e3348;border-radius:6px;color:#e2e8f0;font-size:0.85rem">
+          <label style="display:inline-flex;align-items:center;gap:0.25rem;color:#8892a4;font-size:0.8rem;cursor:pointer;user-select:none"><input id="as-water" type="checkbox" checked>💧 Water</label>
+          <label style="display:inline-flex;align-items:center;gap:0.25rem;color:#8892a4;font-size:0.8rem;cursor:pointer;user-select:none"><input id="as-food"  type="checkbox">🍌 Food</label>
+          <label style="display:inline-flex;align-items:center;gap:0.25rem;color:#8892a4;font-size:0.8rem;cursor:pointer;user-select:none"><input id="as-bags"  type="checkbox">🎒 Bags</label>
           <button id="as-add-btn" class="btn-primary" style="padding:0.4rem 0.9rem;font-size:0.85rem;white-space:nowrap">Add</button>
         </div>
         <div id="as-error" style="display:none;color:#f87171;font-size:0.8rem;margin-top:0.4rem"></div>
@@ -665,7 +668,19 @@ function buildAidStationListHtml(stations, editIdx = -1) {
     return `<div style="color:#4b5563;font-size:0.85rem;padding:0.5rem 0">No aid stations added yet.</div>`;
   }
   const inputStyle = `padding:0.3rem 0.5rem;background:#0d1117;border:1px solid #2e3348;border-radius:5px;color:#e2e8f0;font-size:0.82rem`;
+  const chkLabelStyle = `display:inline-flex;align-items:center;gap:0.25rem;color:#8892a4;font-size:0.8rem;cursor:pointer;user-select:none`;
+  // Available-provisions pills shown in the read-only row, dim when absent
+  const chipHtml = (on, icon, tip) =>
+    `<span style="font-size:0.9rem;opacity:${on ? "1" : "0.18"};filter:${on ? "none" : "grayscale(1)"}" title="${tip}: ${on ? "yes" : "no"}">${icon}</span>`;
+
   return stations.map((as, i) => {
+    // Water defaults to true (most aid stations have it). Missing flags
+    // on older rows before this feature land are treated as water-yes /
+    // food-no / bags-no.
+    const hasWater = as.has_water !== false;
+    const hasFood = !!as.has_food;
+    const hasBags = !!as.has_bags;
+
     if (i === editIdx) {
       // ── Inline edit row ──
       return `
@@ -676,6 +691,9 @@ function buildAidStationListHtml(stations, editIdx = -1) {
           <input data-edit-notes value="${(as.notes||'').replace(/"/g,'&quot;')}" placeholder="Notes" style="${inputStyle};flex:1;min-width:80px">
           <input data-edit-lat type="number" value="${as.lat ?? ''}" step="0.0001" placeholder="Lat" title="Latitude (optional — for map pin)" style="${inputStyle};width:75px">
           <input data-edit-lon type="number" value="${as.lon ?? ''}" step="0.0001" placeholder="Lon" title="Longitude (optional — for map pin)" style="${inputStyle};width:75px">
+          <label style="${chkLabelStyle}"><input data-edit-water type="checkbox" ${hasWater ? "checked" : ""}>💧 Water</label>
+          <label style="${chkLabelStyle}"><input data-edit-food  type="checkbox" ${hasFood  ? "checked" : ""}>🍌 Food</label>
+          <label style="${chkLabelStyle}"><input data-edit-bags  type="checkbox" ${hasBags  ? "checked" : ""}>🎒 Bags</label>
           <button data-save-as="${i}" style="padding:0.3rem 0.7rem;background:#4f7cff;border:none;border-radius:5px;color:#fff;cursor:pointer;font-size:0.82rem">✓ Save</button>
           <button data-cancel-as="${i}" style="background:none;border:none;color:#8892a4;cursor:pointer;font-size:0.9rem;padding:0 0.2rem" title="Cancel">✕</button>
         </div>`;
@@ -686,6 +704,11 @@ function buildAidStationListHtml(stations, editIdx = -1) {
         <span style="color:#facc15;font-size:1rem">⛺</span>
         <span style="flex:1;color:#e2e8f0;font-size:0.9rem">${as.name}</span>
         <span style="color:#8892a4;font-size:0.85rem;font-variant-numeric:tabular-nums">${as.distance_km} km</span>
+        <span style="display:inline-flex;gap:0.25rem;align-items:center">
+          ${chipHtml(hasWater, "💧", "Water")}
+          ${chipHtml(hasFood, "🍌", "Food")}
+          ${chipHtml(hasBags, "🎒", "Drop bag")}
+        </span>
         ${as.notes ? `<span style="color:#4b5563;font-size:0.8rem;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${as.notes}">${as.notes}</span>` : ""}
         <button data-edit-as="${i}" style="background:none;border:none;color:#4b5563;cursor:pointer;font-size:0.85rem;padding:0 0.2rem;line-height:1" title="Edit">✎</button>
         <button data-delete-as="${i}" style="background:none;border:none;color:#4b5563;cursor:pointer;font-size:1rem;padding:0 0.2rem;line-height:1" title="Remove">✕</button>
@@ -743,11 +766,24 @@ function initCourseUI(container, race) {
       const name = nameEl.value.trim();
       const dist = parseFloat(distEl.value);
       const notes = notesEl ? notesEl.value.trim() : "";
+      const hasWater = container.querySelector("#as-water")?.checked ?? true;
+      const hasFood = container.querySelector("#as-food")?.checked ?? false;
+      const hasBags = container.querySelector("#as-bags")?.checked ?? false;
       if (!validateStation(name, dist, errEl)) return;
-      const newStations = [...(race.aid_stations || []), { name, distance_km: dist, notes }];
+      const newStations = [
+        ...(race.aid_stations || []),
+        { name, distance_km: dist, notes, has_water: hasWater, has_food: hasFood, has_bags: hasBags },
+      ];
       addBtn.disabled = true;
       await saveStations(newStations);
       nameEl.value = ""; distEl.value = ""; if (notesEl) notesEl.value = "";
+      // Reset add-form checkboxes to their defaults (water yes, food/bags no)
+      const waterEl = container.querySelector("#as-water");
+      const foodEl = container.querySelector("#as-food");
+      const bagsEl = container.querySelector("#as-bags");
+      if (waterEl) waterEl.checked = true;
+      if (foodEl) foodEl.checked = false;
+      if (bagsEl) bagsEl.checked = false;
       addBtn.disabled = false;
     });
   }
@@ -788,7 +824,14 @@ function initCourseUI(container, race) {
         const latVal = row.querySelector("[data-edit-lat]").value.trim();
         const lonVal = row.querySelector("[data-edit-lon]").value.trim();
         if (!validateStation(name, dist, errEl)) return;
-        const updated = { name, distance_km: dist, notes };
+        const updated = {
+          name,
+          distance_km: dist,
+          notes,
+          has_water: row.querySelector("[data-edit-water]").checked,
+          has_food: row.querySelector("[data-edit-food]").checked,
+          has_bags: row.querySelector("[data-edit-bags]").checked,
+        };
         if (latVal) updated.lat = parseFloat(latVal);
         if (lonVal) updated.lon = parseFloat(lonVal);
         const newStations = (race.aid_stations || []).map((s, i) =>
@@ -1062,13 +1105,39 @@ function computeNutritionPlan(race, settings) {
     return cumSec;
   }
 
-  // Checkpoints: start + sorted stations + finish
+  // Checkpoints: start + sorted stations + finish. Start has water+food
+  // implicitly (you begin fully stocked); finish doesn't matter.
   const stations = [...(race.aid_stations || [])].sort((a, b) => a.distance_km - b.distance_km);
   const checkpoints = [
-    { name: "Start", dist_m: 0, isStart: true },
-    ...stations.map(s => ({ name: s.name, dist_m: s.distance_km * 1000, isStation: true, dist_km: s.distance_km })),
-    { name: "Finish", dist_m: totalDist_m, isFinish: true },
+    { name: "Start", dist_m: 0, isStart: true, hasWater: true, hasFood: true, hasBags: false },
+    ...stations.map(s => ({
+      name: s.name,
+      dist_m: s.distance_km * 1000,
+      isStation: true,
+      dist_km: s.distance_km,
+      // Default water to true when flag is unset (legacy rows), food/bags to false.
+      hasWater: s.has_water !== false,
+      hasFood: !!s.has_food,
+      hasBags: !!s.has_bags,
+    })),
+    { name: "Finish", dist_m: totalDist_m, isFinish: true, hasWater: true, hasFood: true, hasBags: false },
   ];
+
+  // Look forward to find the next checkpoint with water / with food. If no
+  // such station exists before the finish, you need to carry enough for
+  // the whole remainder.
+  function nextWithWaterAfter(idx) {
+    for (let j = idx + 1; j < checkpoints.length; j++) {
+      if (checkpoints[j].hasWater) return checkpoints[j];
+    }
+    return checkpoints[checkpoints.length - 1];
+  }
+  function nextWithFoodAfter(idx) {
+    for (let j = idx + 1; j < checkpoints.length; j++) {
+      if (checkpoints[j].hasFood) return checkpoints[j];
+    }
+    return checkpoints[checkpoints.length - 1];
+  }
 
   let totalWater = 0, totalCal = 0;
   const rows = checkpoints.map((cp, i) => {
@@ -1081,15 +1150,24 @@ function computeNutritionPlan(race, settings) {
 
     if (i > 0) { totalWater += waterInLeg; totalCal += calInLeg; }
 
-    // Carry-out: what to take FROM this station for the NEXT leg
+    // Carry-out: how much to load up before leaving this checkpoint. Skip
+    // stations without water — nothing to fill from — and extend the
+    // coverage window to the NEXT station that actually has water.
     let carryOutWater = null, carryOutCal = null, overCapacity = false;
     if (!cp.isFinish) {
-      const next = checkpoints[i + 1];
-      const nextLegHr = (timeAtDist(next.dist_m) - arriveSec) / 3600;
-      const nextWaterNeeded = nextLegHr * sweat_rate_ml_per_hr;
-      overCapacity = nextWaterNeeded > carry_capacity_ml;
-      carryOutWater = Math.min(Math.round(nextWaterNeeded * 1.2), carry_capacity_ml);
-      carryOutCal = Math.round(nextLegHr * cal_per_hr);
+      const nextWater = cp.hasWater ? nextWithWaterAfter(i) : null;
+      const nextFood = cp.hasFood ? nextWithFoodAfter(i) : null;
+
+      if (cp.hasWater) {
+        const coverHr = (timeAtDist(nextWater.dist_m) - arriveSec) / 3600;
+        const needed = coverHr * sweat_rate_ml_per_hr;
+        overCapacity = needed > carry_capacity_ml;
+        carryOutWater = Math.min(Math.round(needed * 1.2), carry_capacity_ml);
+      }
+      if (cp.hasFood) {
+        const coverHr = (timeAtDist(nextFood.dist_m) - arriveSec) / 3600;
+        carryOutCal = Math.round(coverHr * cal_per_hr);
+      }
     }
 
     return {
@@ -1097,6 +1175,9 @@ function computeNutritionPlan(race, settings) {
       distKm: cp.dist_km || (cp.dist_m / 1000),
       isStart: !!cp.isStart,
       isFinish: !!cp.isFinish,
+      hasWater: cp.hasWater,
+      hasFood: cp.hasFood,
+      hasBags: cp.hasBags,
       arriveSec,
       legSec: i > 0 ? legSec : null,
       waterInLeg: i > 0 ? waterInLeg : null,
@@ -1153,11 +1234,20 @@ function nutritionPlanHtml(result, settings) {
   const tdStyle = `padding:0.6rem 0.75rem;font-size:0.85rem;color:#e2e8f0;vertical-align:middle`;
   const tdSubStyle = `padding:0.6rem 0.75rem;font-size:0.85rem;color:#8892a4;vertical-align:middle`;
 
+  // Small dim-when-absent availability icons shown on each station row.
+  const chip = (on, icon, tip) =>
+    `<span style="font-size:0.9rem;margin-right:0.15rem;opacity:${on ? "1" : "0.2"};filter:${on ? "none" : "grayscale(1)"}" title="${tip}: ${on ? "available" : "not available"}">${icon}</span>`;
+
   const rowHtml = result.rows.map((row) => {
     const icon = row.isStart ? "🏁" : row.isFinish ? "🏁" : "⛺";
+
+    const availHtml = (row.isStart || row.isFinish)
+      ? ""
+      : ` <span style="margin-left:0.4rem">${chip(row.hasWater, "💧", "Water")}${chip(row.hasFood, "🍌", "Food")}${chip(row.hasBags, "🎒", "Drop bag")}</span>`;
+
     const nameCell = row.isStart || row.isFinish
       ? `<td style="${tdStyle};font-weight:500">${icon} ${row.name}</td>`
-      : `<td style="${tdStyle}">${icon} <strong>${row.name}</strong> <span style="color:#4b5563;font-size:0.8rem">· ${row.distKm.toFixed(1)} km</span></td>`;
+      : `<td style="${tdStyle}">${icon} <strong>${row.name}</strong> <span style="color:#4b5563;font-size:0.8rem">· ${row.distKm.toFixed(1)} km</span>${availHtml}</td>`;
 
     const arriveCell = `<td style="${tdSubStyle};font-variant-numeric:tabular-nums">${fmtSec(row.arriveSec)}</td>`;
     const legTimeCell = `<td style="${tdSubStyle}">${fmtLegTime(row.legSec)}</td>`;
@@ -1167,15 +1257,24 @@ function nutritionPlanHtml(result, settings) {
     let carryCell;
     if (row.isFinish) {
       carryCell = `<td style="${tdSubStyle}">–</td>`;
+    } else if (!row.hasWater && !row.hasFood) {
+      // Nothing to load up here — make this visually obvious.
+      carryCell = `<td style="${tdSubStyle};font-style:italic">skip (no supplies)</td>`;
     } else {
       const warnHtml = row.overCapacity
         ? `<span style="color:#fb923c;margin-left:0.3rem" title="Exceeds your ${fmtWater(settings.carry_capacity_ml)} capacity!">⚠</span>`
         : "";
       const waterColor = row.overCapacity ? "#fb923c" : "#60a5fa";
+      const waterPart = row.carryOutWater !== null
+        ? `<span style="color:${waterColor};font-weight:600">${fmtWater(row.carryOutWater)}</span>${warnHtml}`
+        : `<span style="color:#4b5563">no water</span>`;
+      const calPart = row.carryOutCal !== null
+        ? `<span style="color:#fb923c;font-weight:500">${row.carryOutCal} kcal</span>`
+        : `<span style="color:#4b5563">no food</span>`;
       carryCell = `<td style="${tdStyle};background:#0d1117;border-radius:6px">
-        <span style="color:${waterColor};font-weight:600">${fmtWater(row.carryOutWater)}</span>${warnHtml}
+        ${waterPart}
         <span style="color:#4b5563;margin:0 0.3rem">·</span>
-        <span style="color:#fb923c;font-weight:500">${row.carryOutCal} kcal</span>
+        ${calPart}
       </td>`;
     }
 
