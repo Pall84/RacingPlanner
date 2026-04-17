@@ -1,0 +1,16 @@
+from app.models.schema import (  # noqa: F401
+    Activity,
+    ActivityMetrics,
+    ActivityStream,
+    Athlete,
+    AthleteGoal,
+    DailyFitness,
+    GarminCredentials,
+    GarminDailyHealth,
+    Invite,
+    KmSplit,
+    Lap,
+    PersonalRecord,
+    Race,
+    WeeklySummary,
+)

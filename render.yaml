@@ -1,0 +1,44 @@
+# Render infrastructure-as-code.
+#
+# To use: in the Render dashboard, choose "New +" → "Blueprint", point it at
+# this repo, and Render will provision the service from this file.
+#
+# The `dockerfilePath` tells Render to build the backend image from
+# backend/Dockerfile. Secrets are listed here with `sync: false` so Render's
+# UI requires them to be set manually — they never enter the repo.
+services:
+  - type: web
+    name: racingplanner-api
+    runtime: docker
+    plan: free
+    region: frankfurt            # swap to your nearest Render region if preferred
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # --- Provisioned or managed-elsewhere values ---
+      - key: DATABASE_URL            # Neon connection string (use the "asyncpg" variant)
+        sync: false
+      - key: SESSION_SECRET          # python -c "import secrets; print(secrets.token_hex(32))"
+        sync: false
+      - key: GARMIN_MASTER_KEY       # python -c "import secrets; print(secrets.token_hex(32))"
+        sync: false
+      - key: STRAVA_CLIENT_ID
+        sync: false
+      - key: STRAVA_CLIENT_SECRET
+        sync: false
+
+      # --- Declared here so you don't forget to set them ---
+      - key: STRAVA_REDIRECT_URI     # https://racingplanner-api.onrender.com/auth/callback
+        sync: false
+      - key: FRONTEND_ORIGIN         # https://<your-netlify-site>.netlify.app
+        sync: false
+      - key: ADMIN_ATHLETE_ID        # your Strava athlete id
+        sync: false
+
+      # --- Optional ---
+      - key: SENTRY_DSN
+        sync: false
+      - key: LOG_LEVEL
+        value: INFO
