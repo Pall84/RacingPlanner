@@ -163,10 +163,23 @@ async def trigger_garmin_sync(
     db: AsyncSession = Depends(get_db),
 ):
     """Manual sync of Garmin health data (last 14 days)."""
+    import logging
+
     from app.garmin.sync import sync_garmin_health
 
+    log = logging.getLogger("racingplanner.garmin.sync")
     athlete_id = _get_athlete_id(request)
-    count = await sync_garmin_health(db, athlete_id, days=14)
+    try:
+        count = await sync_garmin_health(db, athlete_id, days=14)
+    except Exception as e:  # noqa: BLE001
+        # Without this, an uncaught 500 bypasses the CORS middleware and the
+        # browser reports the frustrating "Failed to fetch" instead of the
+        # actual reason. Log server-side too so the cause is visible in logs.
+        log.exception("Garmin sync failed for athlete %s", athlete_id)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Garmin sync failed: {type(e).__name__}: {e}",
+        ) from e
     return {"synced_days": count}
 
 
