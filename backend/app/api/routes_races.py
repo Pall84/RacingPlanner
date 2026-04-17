@@ -39,6 +39,17 @@ def _fmt_pace(sec_per_km: float | None) -> str | None:
 
 
 def _race_row(race: Race) -> dict:
+    # Backtest: if both predicted and actual exist, surface the delta so the
+    # user (and we) can judge whether predictions are systematically biased.
+    # Positive pct = model was optimistic (predicted faster than actual).
+    pred = race.predicted_time_sec
+    actual = race.actual_time_sec
+    delta_sec = None
+    error_pct = None
+    if pred and actual and pred > 0:
+        delta_sec = int(round(actual - pred))
+        error_pct = round((actual - pred) / pred * 100.0, 1)
+
     return {
         "id": race.id,
         "name": race.name,
@@ -63,6 +74,8 @@ def _race_row(race: Race) -> dict:
         "linked_activity_id": race.linked_activity_id,
         "actual_time_sec": race.actual_time_sec,
         "actual_time_str": _fmt_time(race.actual_time_sec),
+        "prediction_delta_sec": delta_sec,
+        "prediction_error_pct": error_pct,
         "notes": race.notes,
         "aid_stations": json.loads(race.aid_stations_json) if race.aid_stations_json else [],
         "nutrition_settings": json.loads(race.nutrition_settings_json) if race.nutrition_settings_json else {
@@ -122,7 +135,30 @@ async def list_races(
     today = __import__("datetime").date.today().isoformat()
     upcoming = [_race_row(r) for r in races if r.date >= today]
     past = [_race_row(r) for r in races if r.date < today]
-    return {"upcoming": upcoming, "past": past}
+
+    # Backtest summary across all races with both predicted + actual. Gives
+    # the user a "model is on average X% optimistic/pessimistic" number so
+    # they can calibrate trust — and gives us a ground-truth view of whether
+    # predictor changes help or hurt.
+    errors = [r["prediction_error_pct"] for r in past if r.get("prediction_error_pct") is not None]
+    backtest = None
+    if errors:
+        mean_err = sum(errors) / len(errors)
+        abs_errs = sorted(abs(e) for e in errors)
+        mid = len(abs_errs) // 2
+        median_abs_err = (
+            abs_errs[mid] if len(abs_errs) % 2 == 1
+            else (abs_errs[mid - 1] + abs_errs[mid]) / 2
+        )
+        backtest = {
+            "race_count": len(errors),
+            "mean_error_pct": round(mean_err, 1),
+            "median_abs_error_pct": round(median_abs_err, 1),
+            # Signed: positive means model is optimistic (predicts faster than actual)
+            "bias_direction": "optimistic" if mean_err > 0.5 else "pessimistic" if mean_err < -0.5 else "neutral",
+        }
+
+    return {"upcoming": upcoming, "past": past, "backtest": backtest}
 
 
 @router.post("")

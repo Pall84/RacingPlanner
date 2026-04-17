@@ -53,7 +53,7 @@ async function renderList(container) {
     return;
   }
 
-  const { upcoming = [], past = [] } = data;
+  const { upcoming = [], past = [], backtest = null } = data;
 
   container.innerHTML = `
     <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem">
@@ -77,7 +77,23 @@ async function renderList(container) {
     ` : ""}
 
     ${past.length > 0 ? `
-      <h2 style="margin-bottom:1rem;color:#8892a4">Past Races</h2>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+        <h2 style="margin:0;color:#8892a4">Past Races</h2>
+        ${backtest ? `
+          <div title="Mean signed error across ${backtest.race_count} completed race(s). Positive = model predicted faster than you actually ran." style="display:flex;gap:1rem;align-items:center;font-size:0.85rem;background:#1e2235;border:1px solid #2e3348;padding:0.5rem 0.9rem;border-radius:8px">
+            <span style="color:#8892a4">Predictor accuracy (${backtest.race_count} race${backtest.race_count === 1 ? "" : "s"}):</span>
+            <span style="color:${Math.abs(backtest.mean_error_pct) < 2 ? "#4ade80" : Math.abs(backtest.mean_error_pct) < 5 ? "#facc15" : "#f87171"};font-weight:600">
+              ${backtest.mean_error_pct >= 0 ? "+" : ""}${backtest.mean_error_pct}% mean
+            </span>
+            <span style="color:#8892a4">·</span>
+            <span style="color:#e2e8f0">±${backtest.median_abs_error_pct}% median</span>
+            ${backtest.bias_direction !== "neutral" ? `
+              <span style="color:#8892a4">·</span>
+              <span style="color:#8892a4;font-size:0.8rem">(${backtest.bias_direction})</span>
+            ` : ""}
+          </div>
+        ` : ""}
+      </div>
       <div class="race-cards" style="display:grid;gap:1rem">
         ${past.map((r) => raceCard(r, true)).join("")}
       </div>
@@ -173,11 +189,18 @@ async function renderList(container) {
 }
 
 function raceCard(r, isPast = false) {
-  const delta = r.actual_time_sec && r.predicted_time_sec
-    ? r.actual_time_sec - r.predicted_time_sec
-    : null;
+  // Prefer server-computed delta + pct (keeps formatting consistent with
+  // the backtest summary). Fall back to local calc for backward compat
+  // if an older row is cached.
+  const delta = r.prediction_delta_sec ?? (
+    r.actual_time_sec && r.predicted_time_sec
+      ? r.actual_time_sec - r.predicted_time_sec
+      : null
+  );
+  const errPct = r.prediction_error_pct;
   const deltaStr = delta !== null
-    ? `${delta >= 0 ? "+" : ""}${fmtTimeSec(Math.abs(delta))} vs predicted`
+    ? `${delta >= 0 ? "+" : ""}${fmtTimeSec(Math.abs(delta))} vs predicted` +
+      (errPct !== null && errPct !== undefined ? ` (${errPct >= 0 ? "+" : ""}${errPct}%)` : "")
     : "";
 
   return `
