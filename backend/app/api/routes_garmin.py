@@ -59,11 +59,13 @@ async def connect_garmin(
         raise HTTPException(status_code=404, detail="Athlete not found")
 
     # Validate credentials by attempting a real Garmin login.
+    from app.api._errors import translate_garmin_error
+
     client = GarminClient(body.email, body.password, athlete_id=athlete_id)
     try:
         await client.login()
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Garmin login failed: {e}") from e
+    except Exception as e:  # noqa: BLE001
+        raise translate_garmin_error(e, action="connect Garmin") from e
 
     # Encrypt with the athlete's derived key; ensures salt exists.
     email_ct = encrypt_for_athlete(athlete, body.email)
@@ -163,23 +165,14 @@ async def trigger_garmin_sync(
     db: AsyncSession = Depends(get_db),
 ):
     """Manual sync of Garmin health data (last 14 days)."""
-    import logging
-
+    from app.api._errors import translate_garmin_error
     from app.garmin.sync import sync_garmin_health
 
-    log = logging.getLogger("racingplanner.garmin.sync")
     athlete_id = _get_athlete_id(request)
     try:
         count = await sync_garmin_health(db, athlete_id, days=14)
     except Exception as e:  # noqa: BLE001
-        # Without this, an uncaught 500 bypasses the CORS middleware and the
-        # browser reports the frustrating "Failed to fetch" instead of the
-        # actual reason. Log server-side too so the cause is visible in logs.
-        log.exception("Garmin sync failed for athlete %s", athlete_id)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Garmin sync failed: {type(e).__name__}: {e}",
-        ) from e
+        raise translate_garmin_error(e, action="sync Garmin health") from e
     return {"synced_days": count}
 
 

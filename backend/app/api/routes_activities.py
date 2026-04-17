@@ -338,40 +338,13 @@ async def refresh_activity_from_strava(
     if not act_check.scalar_one_or_none():
         raise HTTPException(status_code=404)
 
-    import logging
-
-    import httpx
-
+    from app.api._errors import translate_strava_error
     from app.strava.sync import refresh_activity
 
-    log = logging.getLogger("racingplanner.refresh")
     try:
         success = await refresh_activity(db, activity_id, athlete_id)
-    except RuntimeError as e:
-        # Raised by the rate limiter when this athlete (or the whole app)
-        # is over Strava's quota. 429 is the right code here.
-        log.info("refresh rate-limited for athlete %s: %s", athlete_id, e)
-        raise HTTPException(status_code=429, detail=str(e)) from e
-    except httpx.HTTPStatusError as e:
-        # Strava returned 4xx/5xx. Surface their message so we can tell
-        # apart "auth revoked" (401), "not found on Strava" (404), etc.
-        status = e.response.status_code
-        body_hint = (e.response.text or "")[:200]
-        log.warning(
-            "Strava returned %s for activity %s: %s", status, activity_id, body_hint
-        )
-        if status == 401:
-            raise HTTPException(
-                status_code=401,
-                detail="Strava token is no longer valid. Please log out and log back in.",
-            ) from e
-        raise HTTPException(
-            status_code=502,
-            detail=f"Strava API returned {status}: {body_hint}",
-        ) from e
     except Exception as e:  # noqa: BLE001
-        log.exception("Unexpected refresh error for activity %s", activity_id)
-        raise HTTPException(status_code=500, detail=f"Refresh failed: {e}") from e
+        raise translate_strava_error(e, action="refresh activity") from e
 
     if not success:
         # The only remaining False path is "activity no longer in our DB".
@@ -542,14 +515,23 @@ async def sync_new(
 ):
     athlete_id = _get_athlete_id(request)
     import asyncio
+    import logging
 
     from app.analytics.compute_pipeline import run_full_pipeline
 
+    log = logging.getLogger("racingplanner.sync.incremental")
     q: asyncio.Queue = asyncio.Queue()
 
     async def _run():
-        async with async_session() as session:
-            await run_full_pipeline(session, athlete_id, q, full_sync=False)
+        # Mirror routes_sync.full_sync — surface pipeline errors via the SSE
+        # progress queue so the frontend shows them.
+        try:
+            async with async_session() as session:
+                await run_full_pipeline(session, athlete_id, q, full_sync=False)
+        except Exception as e:  # noqa: BLE001
+            log.exception("Incremental sync pipeline crashed for athlete %s", athlete_id)
+            await q.put(f"ERROR: Sync failed: {type(e).__name__}: {e}")
+            await q.put("DONE")
 
     background_tasks.add_task(_run)
     return {"queued": True, "message": "Sync started. Monitor progress at /api/sync/progress"}

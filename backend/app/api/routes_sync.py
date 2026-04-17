@@ -65,14 +65,25 @@ async def full_sync(
     background_tasks: BackgroundTasks,
 ):
     athlete_id = _get_athlete_id(request)
+    import logging
+
     from app.analytics.compute_pipeline import run_full_pipeline
 
+    log = logging.getLogger("racingplanner.sync.full")
     q: asyncio.Queue = asyncio.Queue()
     _progress_queues[athlete_id] = q
 
     async def _run():
-        async with async_session() as session:
-            await run_full_pipeline(session, athlete_id, q, full_sync=True)
+        # Errors here can't reach the user synchronously — the HTTP response
+        # has already returned. Report them via the SSE progress queue so the
+        # frontend can show them, and close the stream cleanly with DONE.
+        try:
+            async with async_session() as session:
+                await run_full_pipeline(session, athlete_id, q, full_sync=True)
+        except Exception as e:  # noqa: BLE001
+            log.exception("Full sync pipeline crashed for athlete %s", athlete_id)
+            await q.put(f"ERROR: Pipeline failed: {type(e).__name__}: {e}")
+            await q.put("DONE")
 
     background_tasks.add_task(_run)
     return {"queued": True, "message": "Full sync started"}
