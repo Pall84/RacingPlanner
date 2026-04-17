@@ -28,8 +28,19 @@ PERCENT_MAX_ZONES = [
     (0.90, 1.00),
 ]
 
-# Banister exponential coefficients
-TRIMP_COEFF = {"male": 1.92, "female": 1.67}
+# Banister/Morton exponential TRIMP coefficients — each gender has a paired
+# (scalar, exponent). The scalar is NOT interchangeable: the design intent is
+# that at HRR=1.0 the per-minute TRIMP is similar across genders. Using the
+# male scalar 0.64 with the female exponent 1.67 underweights female TRIMP
+# by ~25% at threshold and ~34% at max (a common bug in third-party clones).
+#   Male:   TRIMP = duration_min × HRR × 0.64 × exp(1.92 × HRR)
+#   Female: TRIMP = duration_min × HRR × 0.86 × exp(1.67 × HRR)
+# Source: Morton, Fitz-Clarke, Banister (1990) "Modelling human performance
+# in running", J Appl Physiol 69(3).
+TRIMP_COEFF = {
+    "male":   (0.64, 1.92),
+    "female": (0.86, 1.67),
+}
 
 
 def _safe_mean(arr) -> float | None:
@@ -178,7 +189,7 @@ class ActivityMetricsEngine:
             return {}
 
         zone_bounds = self._hr_zone_boundaries()
-        coeff = TRIMP_COEFF.get(self.trimp_gender, 1.92)
+        scalar, coeff = TRIMP_COEFF.get(self.trimp_gender, TRIMP_COEFF["male"])
         hrr = self.max_hr - self.resting_hr
 
         z_seconds = [0, 0, 0, 0, 0]
@@ -196,16 +207,26 @@ class ActivityMetricsEngine:
             hr_reserve = (hr_val - self.resting_hr) / hrr
             hr_reserve = max(0.0, min(1.0, hr_reserve))
 
-            # TRIMP Banister
+            # Gender-paired Banister TRIMP (see TRIMP_COEFF comment).
             y = math.exp(coeff * hr_reserve)
-            trimp_delta = (dt / 60.0) * hr_reserve * 0.64 * y
+            trimp_delta = (dt / 60.0) * hr_reserve * scalar * y
 
-            # Assign to zone
+            # Assign to zone. Anything below Z1's lower bound is still valid
+            # training time (warmup, cooldown, slow jog) — bucket it into Z1
+            # rather than silently dropping it. Without this, total zone time
+            # can be less than total moving time and some TRIMP never lands
+            # in any z_trimp bucket.
+            assigned = False
             for z_idx, (lo, hi) in enumerate(zone_bounds):
                 if lo <= hr_val < hi or (z_idx == 4 and hr_val >= hi):
                     z_seconds[z_idx] += int(dt)
                     z_trimp[z_idx] += trimp_delta
+                    assigned = True
                     break
+            if not assigned:
+                # Below Z1 lower bound (HR < resting + 0.5·HRR in Karvonen).
+                z_seconds[0] += int(dt)
+                z_trimp[0] += trimp_delta
 
         return {
             "z1_seconds": z_seconds[0],

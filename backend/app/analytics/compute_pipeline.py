@@ -50,8 +50,21 @@ async def compute_metrics_for_activity(db, activity: Activity, settings) -> bool
     )
     m = engine.compute_all()
 
-    # Compute per-activity VDOT
-    estimated_vdot = compute_per_activity_vdot(activity.distance, activity.moving_time)
+    # Compute per-activity VDOT — but only for hard efforts.
+    # VDOT is defined for near-maximal performances (Daniels' original tables
+    # assume a race or time trial). Computing it from an easy run tells you
+    # "what VO2max would be required to run this pace maximally" — not the
+    # athlete's VO2max. Applying it indiscriminately pollutes the trends
+    # scatter plot with bogus low numbers. Gate on average HR ≥ 85% of max,
+    # which captures races, threshold, and VO2max intervals. No HR → no VDOT.
+    estimated_vdot = None
+    hr_gate = 0.85 * settings.max_hr if settings.max_hr else None
+    if (
+        hr_gate
+        and activity.average_heartrate
+        and activity.average_heartrate >= hr_gate
+    ):
+        estimated_vdot = compute_per_activity_vdot(activity.distance, activity.moving_time)
 
     # Upsert activity_metrics
     await db.execute(

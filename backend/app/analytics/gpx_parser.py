@@ -34,15 +34,64 @@ def _find_trkpts(root: ET.Element):
     return pts, ""
 
 
-def _raw_gain_loss(eles: list) -> tuple:
-    """Sum all positive and negative elevation deltas directly from raw data."""
+def _raw_gain_loss(eles: list, min_delta_m: float = 1.5) -> tuple:
+    """Sum positive and negative elevation deltas, filtering GPS noise.
+
+    Naive sum of every per-point delta overestimates total climb on noisy
+    tracks by 30–100% — each 0.1 m GPS jitter between samples gets added.
+    Instead we track the running extremum since the last direction change
+    and only commit a gain/loss when the accumulated swing exceeds
+    `min_delta_m`. 1.5 m is roughly the per-sample noise floor of consumer
+    barometric altimeters; changes below that are indistinguishable from noise.
+    Garmin/Strava use similar thresholds internally.
+    """
+    if len(eles) < 2:
+        return 0.0, 0.0
+
     gain = loss = 0.0
+    # Pivot tracks the last confirmed direction change (either a peak after
+    # an ascent or a trough after a descent). We only commit a segment once
+    # the elevation has moved min_delta_m away from the pivot in the new
+    # direction.
+    pivot = eles[0]
+    direction = 0  # +1 ascending, -1 descending, 0 unknown
+    extremum = eles[0]  # running max (if ascending) or min (if descending)
+
     for i in range(1, len(eles)):
-        delta = eles[i] - eles[i - 1]
-        if delta > 0:
-            gain += delta
-        else:
-            loss += abs(delta)
+        e = eles[i]
+        if direction == 0:
+            if e > pivot + min_delta_m:
+                direction = 1
+                extremum = e
+            elif e < pivot - min_delta_m:
+                direction = -1
+                extremum = e
+            # else: still within noise band — hold
+        elif direction == 1:  # currently ascending
+            if e > extremum:
+                extremum = e
+            elif e < extremum - min_delta_m:
+                # Confirmed reversal — commit the climb we were building.
+                gain += extremum - pivot
+                pivot = extremum
+                direction = -1
+                extremum = e
+        else:  # direction == -1, currently descending
+            if e < extremum:
+                extremum = e
+            elif e > extremum + min_delta_m:
+                # Confirmed reversal — commit the descent.
+                loss += pivot - extremum
+                pivot = extremum
+                direction = 1
+                extremum = e
+
+    # Commit whatever was in progress at the end of the track.
+    if direction == 1:
+        gain += extremum - pivot
+    elif direction == -1:
+        loss += pivot - extremum
+
     return gain, loss
 
 
