@@ -88,7 +88,7 @@ Render will build, apply Alembic migrations, and boot `uvicorn`. First request a
 2. Build settings are auto-detected from `frontend/netlify.toml`:
    - Base directory: `frontend`
    - Build command: `npm ci && npm run build`
-   - Publish directory: `frontend/dist`
+   - Publish directory: `dist` (resolves to `frontend/dist`)
 3. Add environment variable `VITE_API_BASE` = `https://<your-render-service>.onrender.com`.
 4. Deploy. Once live, copy the URL back into Render's `FRONTEND_ORIGIN` and redeploy the backend (so CORS accepts it).
 

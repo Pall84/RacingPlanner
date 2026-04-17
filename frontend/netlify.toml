@@ -1,7 +1,9 @@
 [build]
+  # All paths below are resolved relative to `base`, so `publish = "dist"`
+  # means /opt/build/repo/frontend/dist on Netlify.
   base = "frontend"
   command = "npm ci && npm run build"
-  publish = "frontend/dist"
+  publish = "dist"
 
 [build.environment]
   NODE_VERSION = "20"
