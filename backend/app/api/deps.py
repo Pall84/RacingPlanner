@@ -19,8 +19,26 @@ from app.security import SESSION_COOKIE_NAME, verify_session
 
 
 async def get_db() -> AsyncIterator[AsyncSession]:
+    """Per-request DB session.
+
+    Unit-of-work pattern: each request is one transaction. On clean success
+    we commit all pending changes; on any exception we roll back. This
+    means handlers generally don't need explicit commits — `db.flush()`
+    inside a handler only makes changes visible in-session, but we promote
+    them to durable on the way out.
+
+    Handlers that have already committed explicitly (for intra-request
+    isolation, or to split long work into multiple transactions) are fine:
+    a second commit on an already-committed session is a cheap no-op.
+    """
     async with SessionLocal() as session:
-        yield session
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise
+        else:
+            await session.commit()
 
 
 async def get_current_athlete(
