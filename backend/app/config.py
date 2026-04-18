@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     strava_client_id: str = ""
     strava_client_secret: str = ""
     strava_redirect_uri: str = "http://localhost:8000/auth/callback"
+    # Shared secret that Strava echoes back during push-subscription setup.
+    # Generate once (`python -c "import secrets; print(secrets.token_urlsafe(24))"`),
+    # store in Render env. Empty = webhook endpoint rejects all handshakes,
+    # which is also the desired behavior when the feature is unconfigured.
+    strava_webhook_verify_token: str = ""
 
     garmin_master_key: str = ""
 

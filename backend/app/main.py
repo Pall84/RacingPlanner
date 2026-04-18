@@ -14,6 +14,7 @@ from app.api import (
     routes_goals,
     routes_races,
     routes_sync,
+    routes_webhooks,
 )
 from app.config import get_settings
 from app.database import engine
@@ -49,6 +50,7 @@ app.include_router(routes_sync.router)
 app.include_router(routes_races.router)
 app.include_router(routes_goals.router)
 app.include_router(routes_garmin.router)
+app.include_router(routes_webhooks.router)
 
 
 @app.exception_handler(Exception)

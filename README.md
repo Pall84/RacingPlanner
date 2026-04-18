@@ -112,6 +112,36 @@ In **Settings → Branches → Rule for `main`**:
 - Require the `Backend CI / lint-and-test` check to pass
 - Forbid force-pushes
 
+## Strava webhooks (optional but recommended)
+
+Without webhooks, users click **Sync New** on the Activities page to pull
+new activities from Strava. With webhooks configured, the backend receives
+a push from Strava within seconds of each activity being created, updated,
+or deleted, and refreshes automatically.
+
+Setup (run once after deploy):
+
+```bash
+# 1. Generate a verify token and set it on Render (and in local .env).
+python -c "import secrets; print(secrets.token_urlsafe(24))"
+
+# 2. After Render has picked up the new env var and redeployed, register
+#    the subscription with Strava. This ALSO triggers a GET handshake
+#    against the callback URL, so the backend must already have the
+#    same verify token set — otherwise the create call fails with 400.
+python backend/scripts/manage_strava_subscription.py create \
+    --callback-url https://<your-backend>.onrender.com/api/webhooks/strava
+
+# 3. Optional: confirm it's registered
+python backend/scripts/manage_strava_subscription.py list
+
+# Revoke (stops all webhook events; users fall back to manual sync)
+python backend/scripts/manage_strava_subscription.py delete <id>
+```
+
+One subscription per Strava app is allowed. If you change the callback URL
+you need to `delete` the old one before `create`-ing a new one.
+
 ## Architecture
 
 ```

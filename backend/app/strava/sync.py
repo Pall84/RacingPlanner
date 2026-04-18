@@ -58,45 +58,7 @@ async def sync_activities(
             activity_type = raw.get("sport_type") or raw.get("type", "")
             if activity_type not in RUN_TYPES:
                 continue
-
-            stmt = insert(Activity).values(
-                id=raw["id"],
-                athlete_id=athlete_id,
-                name=raw.get("name"),
-                type=raw.get("type"),
-                sport_type=raw.get("sport_type"),
-                start_date=raw.get("start_date"),
-                start_date_local=raw.get("start_date_local"),
-                timezone=raw.get("timezone"),
-                distance=raw.get("distance"),
-                moving_time=raw.get("moving_time"),
-                elapsed_time=raw.get("elapsed_time"),
-                total_elevation_gain=raw.get("total_elevation_gain"),
-                elev_low=raw.get("elev_low"),
-                elev_high=raw.get("elev_high"),
-                average_speed=raw.get("average_speed"),
-                max_speed=raw.get("max_speed"),
-                average_heartrate=raw.get("average_heartrate"),
-                max_heartrate=raw.get("max_heartrate"),
-                average_cadence=raw.get("average_cadence"),
-                average_watts=raw.get("average_watts"),
-                max_watts=raw.get("max_watts"),
-                weighted_average_watts=raw.get("weighted_average_watts"),
-                suffer_score=raw.get("suffer_score"),
-                trainer=int(raw.get("trainer", False)),
-                commute=int(raw.get("commute", False)),
-                manual=int(raw.get("manual", False)),
-                has_heartrate=int(raw.get("has_heartrate", False)),
-                kudos_count=raw.get("kudos_count", 0),
-                map_summary_polyline=raw.get("map", {}).get("summary_polyline"),
-                streams_synced=0,
-                metrics_computed=0,
-                laps_synced=0,
-                raw_json=json.dumps(raw),
-                created_at=int(time.time()),
-            ).on_conflict_do_nothing(index_elements=["id"])
-
-            await db.execute(stmt)
+            await _insert_activity_row(db, athlete_id, raw)
             new_count += 1
 
         page += 1
@@ -368,3 +330,121 @@ async def sync_all_pending_streams(db, athlete_id: int, progress_queue=None):
         *[_sync_one(aid) for aid in pending_ids],
         return_exceptions=True,
     )
+
+
+# ── Webhook helpers ──────────────────────────────────────────────────────────
+
+async def _insert_activity_row(db, athlete_id: int, raw: dict) -> None:
+    """Insert a single activity row from a Strava JSON payload.
+
+    Shared by `sync_activities` (bulk page loop) and `ensure_activity_synced`
+    (webhook single-activity path). Keeping the column list in one place
+    means adding a new field from Strava only has to happen once.
+
+    Uses `on_conflict_do_nothing` on PK — a duplicate event for an already-
+    known activity is a no-op at this layer. `refresh_activity` handles
+    the update side separately.
+    """
+    stmt = insert(Activity).values(
+        id=raw["id"],
+        athlete_id=athlete_id,
+        name=raw.get("name"),
+        type=raw.get("type"),
+        sport_type=raw.get("sport_type"),
+        start_date=raw.get("start_date"),
+        start_date_local=raw.get("start_date_local"),
+        timezone=raw.get("timezone"),
+        distance=raw.get("distance"),
+        moving_time=raw.get("moving_time"),
+        elapsed_time=raw.get("elapsed_time"),
+        total_elevation_gain=raw.get("total_elevation_gain"),
+        elev_low=raw.get("elev_low"),
+        elev_high=raw.get("elev_high"),
+        average_speed=raw.get("average_speed"),
+        max_speed=raw.get("max_speed"),
+        average_heartrate=raw.get("average_heartrate"),
+        max_heartrate=raw.get("max_heartrate"),
+        average_cadence=raw.get("average_cadence"),
+        average_watts=raw.get("average_watts"),
+        max_watts=raw.get("max_watts"),
+        weighted_average_watts=raw.get("weighted_average_watts"),
+        suffer_score=raw.get("suffer_score"),
+        trainer=int(raw.get("trainer", False)),
+        commute=int(raw.get("commute", False)),
+        manual=int(raw.get("manual", False)),
+        has_heartrate=int(raw.get("has_heartrate", False)),
+        kudos_count=raw.get("kudos_count", 0),
+        map_summary_polyline=raw.get("map", {}).get("summary_polyline"),
+        streams_synced=0,
+        metrics_computed=0,
+        laps_synced=0,
+        raw_json=json.dumps(raw),
+        created_at=int(time.time()),
+    ).on_conflict_do_nothing(index_elements=["id"])
+    await db.execute(stmt)
+
+
+async def ensure_activity_synced(db, athlete_id: int, activity_id: int) -> bool:
+    """Insert the activity row if missing, then refresh streams + laps.
+
+    Called from the Strava webhook handler for `aspect_type in (create, update)`.
+    Closes the gap where `refresh_activity` alone returns False on missing rows
+    (the common case for fresh `create` events). Returns True if the activity
+    is in our DB at exit, False if it was skipped (non-run type).
+
+    Non-run types are filtered here for symmetry with `sync_activities`, so
+    the webhook doesn't inflate the DB with cycling / yoga / etc. events.
+    """
+    result = await db.execute(
+        select(Activity).where(
+            Activity.id == activity_id,
+            Activity.athlete_id == athlete_id,
+        )
+    )
+    existing = result.scalar_one_or_none()
+
+    if existing is None:
+        # New activity: fetch and insert before handing off to refresh_activity.
+        token = await get_valid_token(db, athlete_id)
+        client = StravaClient(token, athlete_id)
+        raw = await client.get_activity(activity_id)
+        activity_type = raw.get("sport_type") or raw.get("type", "")
+        if activity_type not in RUN_TYPES:
+            log.info(
+                "webhook ignoring non-run activity=%s type=%s athlete=%s",
+                activity_id, activity_type, athlete_id,
+            )
+            return False
+        await _insert_activity_row(db, athlete_id, raw)
+        await db.flush()
+
+    # Either way, delegate to the existing single-activity refresh path.
+    # This re-fetches the activity summary one more time (small duplication
+    # — worth it to keep one refresh code path) + streams + laps.
+    return await refresh_activity(db, activity_id, athlete_id)
+
+
+async def delete_activity(db, athlete_id: int, activity_id: int) -> bool:
+    """Hard-delete an activity row. Called from the Strava webhook handler
+    for `aspect_type=delete`.
+
+    ORM cascade on ActivityStream / ActivityMetrics / KmSplit / Lap
+    relationships (all configured with `cascade="all, delete-orphan"` in
+    schema.py) carries dependents with it. Races linked to this activity
+    via `Race.linked_activity_id` are on a nullable FK — the reference
+    goes stale, which is already the "not linked" state the UI handles.
+
+    Returns True if a row was deleted, False if it was already gone.
+    """
+    from sqlalchemy import delete as sa_delete
+
+    result = await db.execute(
+        sa_delete(Activity).where(
+            Activity.id == activity_id,
+            Activity.athlete_id == athlete_id,
+        )
+    )
+    deleted = (result.rowcount or 0) > 0
+    if deleted:
+        log.info("webhook deleted activity=%s athlete=%s", activity_id, athlete_id)
+    return deleted
