@@ -216,6 +216,12 @@ class ActivityMetrics(Base):
 
     activity = relationship("Activity", back_populates="metrics")
 
+    __table_args__ = (
+        # Speeds up the classification step (`WHERE workout_type IS NULL`)
+        # which runs on every full sync. Created by alembic 0005.
+        Index("idx_activity_metrics_workout_type", "workout_type"),
+    )
+
 
 class KmSplit(Base):
     __tablename__ = "km_splits"

@@ -137,24 +137,29 @@ async def compute_metrics_for_activity(db, activity: Activity, settings) -> bool
         )
     )
 
-    # Delete old km splits and re-insert
+    # Delete old km splits and re-insert in a single multi-row statement.
+    # Previously this was N round-trips per activity (one INSERT per split,
+    # 5-40 splits each). A full backfill of 500 activities hit 5k-20k trips.
     from sqlalchemy import delete
     await db.execute(delete(KmSplit).where(KmSplit.activity_id == activity.id))
-    for split in m.km_splits:
+    if m.km_splits:
         await db.execute(
-            pg_insert(KmSplit).values(
-                activity_id=activity.id,
-                km_index=split["km_index"],
-                distance_m=split["distance_m"],
-                duration_sec=split["duration_sec"],
-                pace_sec_per_km=split["pace_sec_per_km"],
-                gap_sec_per_km=split["gap_sec_per_km"],
-                avg_hr=split["avg_hr"],
-                avg_cadence=split["avg_cadence"],
-                elevation_gain=split["elevation_gain"],
-                elevation_loss=split["elevation_loss"],
-                avg_grade_pct=split["avg_grade_pct"],
-            )
+            pg_insert(KmSplit).values([
+                {
+                    "activity_id": activity.id,
+                    "km_index": split["km_index"],
+                    "distance_m": split["distance_m"],
+                    "duration_sec": split["duration_sec"],
+                    "pace_sec_per_km": split["pace_sec_per_km"],
+                    "gap_sec_per_km": split["gap_sec_per_km"],
+                    "avg_hr": split["avg_hr"],
+                    "avg_cadence": split["avg_cadence"],
+                    "elevation_gain": split["elevation_gain"],
+                    "elevation_loss": split["elevation_loss"],
+                    "avg_grade_pct": split["avg_grade_pct"],
+                }
+                for split in m.km_splits
+            ])
         )
 
     # Mark computed

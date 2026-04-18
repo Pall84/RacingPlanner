@@ -128,6 +128,11 @@ def _compute_gap_for_rows(
     gap_paces = []
     weights = []
     for i, (act, met) in enumerate(rows):
+        # The caller filters rows where avg_gap_sec_per_km IS NOT NULL, but
+        # being defensive here means a future filter change (or a stale row
+        # slipping through) won't crash the multiply below with a None pace.
+        if met.avg_gap_sec_per_km is None:
+            continue
         z3 = met.z3_seconds or 0
         z4 = met.z4_seconds or 0
         z_total = (met.z1_seconds or 0) + (met.z2_seconds or 0) + z3 + z4 + (met.z5_seconds or 0)
@@ -430,6 +435,11 @@ async def _recent_race_predict(
     otherwise "medium". This can out-weight the Riegel-from-PRs method when
     the PR is stale — which is usually correct.
     """
+    # Div-by-zero guard: _distance_score divides by target_dist_m. A zero
+    # target (upstream parsing error) would crash on the first candidate.
+    if not target_dist_m or target_dist_m <= 0:
+        return None
+
     from datetime import timedelta
     cutoff = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%dT00:00:00Z")
 

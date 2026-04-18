@@ -64,6 +64,13 @@ async def fetch_race_weather(
     race_temps = temps[start_hr:end_hr] or temps
     race_rhs = rhs[start_hr:end_hr] or rhs
 
+    # Defensive guard — `or temps` above handles most thin-forecast cases, but
+    # if the provider returned hours that are all None (e.g. sparse early data
+    # for a date far in the future), the filtered slice can still be empty.
+    # Dividing by zero below would crash the predictor; fail closed instead.
+    if not race_temps or not race_rhs:
+        return None
+
     avg_temp = sum(race_temps) / len(race_temps)
     max_temp = max(race_temps)
     avg_rh = sum(race_rhs) / len(race_rhs)
