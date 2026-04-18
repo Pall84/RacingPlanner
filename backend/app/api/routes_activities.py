@@ -419,8 +419,14 @@ async def refresh_activity_from_strava(
     athlete = (
         await db.execute(select(Athlete).where(Athlete.id == athlete_id))
     ).scalar_one_or_none()
+    # athlete_id filter is redundant with the ownership check above (line 388),
+    # but we keep it as defense-in-depth: if a future refactor moves the outer
+    # check, this query would silently return another user's activity.
     act_result = await db.execute(
-        select(Activity).where(Activity.id == activity_id)
+        select(Activity).where(
+            Activity.id == activity_id,
+            Activity.athlete_id == athlete_id,
+        )
     )
     activity = act_result.scalar_one_or_none()
 
@@ -484,10 +490,15 @@ async def refresh_activity_from_strava(
 
     await db.commit()
 
+    # Defense-in-depth: include athlete_id on this follow-up fetch too, so
+    # this endpoint is self-contained even if the outer ownership check moves.
     result = await db.execute(
         select(Activity, ActivityMetrics)
         .outerjoin(ActivityMetrics, Activity.id == ActivityMetrics.activity_id)
-        .where(Activity.id == activity_id)
+        .where(
+            Activity.id == activity_id,
+            Activity.athlete_id == athlete_id,
+        )
     )
     row = result.first()
     if not row:

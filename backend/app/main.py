@@ -81,9 +81,18 @@ async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSON
             "vary": "Origin",
         }
 
+    # Never echo str(exc) to the client — exception messages can contain DB
+    # URLs with embedded credentials (asyncpg), Strava refresh tokens (in
+    # httpx response bodies), stack frame fragments, etc. The full traceback
+    # is in Render logs via `log.exception`; clients get a generic message.
+    # In non-production we include the exception class to ease local debug.
+    detail = "Internal server error"
+    if not settings.is_production:
+        detail = f"{type(exc).__name__}: internal server error (see logs)"
+
     return JSONResponse(
         status_code=500,
-        content={"detail": f"{type(exc).__name__}: {str(exc)[:500]}"},
+        content={"detail": detail},
         headers=cors_headers,
     )
 
