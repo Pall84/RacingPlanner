@@ -1286,21 +1286,8 @@ async def compute_prediction_history(
 
 
 # ── Formatting helpers ────────────────────────────────────────────────────────
-
-def _fmt_time(sec: float) -> str:
-    if not sec or sec <= 0:
-        return "–"
-    sec = int(round(sec))
-    h, rem = divmod(sec, 3600)
-    m, s = divmod(rem, 60)
-    if h:
-        return f"{h}:{m:02d}:{s:02d}"
-    return f"{m}:{s:02d}"
-
-
-def _fmt_pace(sec_per_km: float) -> str:
-    if not sec_per_km or sec_per_km <= 0:
-        return "–"
-    m = int(sec_per_km // 60)
-    s = int(round(sec_per_km % 60))
-    return f"{m}:{s:02d} /km"
+# Module-internal aliases — predictor code uses _fmt_* throughout; keep the
+# names stable and delegate to the canonical implementations in
+# analytics/formatters.py so there's one source of truth.
+from app.analytics.formatters import fmt_pace as _fmt_pace
+from app.analytics.formatters import fmt_time as _fmt_time

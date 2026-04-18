@@ -3,6 +3,7 @@ Garmin health data sync — fetches daily recovery metrics and stores them.
 """
 import asyncio
 import json
+import logging
 import time
 from datetime import date, timedelta
 
@@ -12,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.garmin.client import GarminClient
 from app.garmin.crypto import decrypt_for_athlete
 from app.models.schema import Athlete, GarminCredentials, GarminDailyHealth
+
+log = logging.getLogger("racingplanner.garmin.sync")
 
 # ---------------------------------------------------------------------------
 # Response parsers — each Garmin endpoint returns different structures.
@@ -212,8 +215,16 @@ async def sync_garmin_health(
                 for k, v in parsed.items():
                     if v is not None:
                         merged[k] = v
-            except Exception:
-                pass  # endpoint may not have data for this date
+            except Exception as e:  # noqa: BLE001
+                # Stays Exception — python-garminconnect raises a half-dozen
+                # undocumented types (Garmin*Error, bare requests errors, etc.)
+                # and we genuinely don't want a per-endpoint failure to
+                # abort the sync. But LOG it with context so the pattern is
+                # visible in Render logs instead of invisible.
+                log.info(
+                    "garmin %s skipped for athlete=%s date=%s: %s",
+                    name, athlete_id, d_str, type(e).__name__,
+                )
             await asyncio.sleep(0.5)  # rate limit
 
         if not merged:

@@ -21,21 +21,19 @@ def _get_athlete_id(request: Request) -> int:
     return athlete_id
 
 
+from app.analytics.formatters import fmt_pace, fmt_time
+
+
+# Legacy aliases — routes returned None (not "–") for missing values, so we
+# keep the shape. Normalizes on the canonical fmt_* internally.
 def _fmt_time(sec: float | None) -> str | None:
-    if not sec or sec <= 0:
-        return None
-    sec = int(round(sec))
-    h, rem = divmod(sec, 3600)
-    m, s = divmod(rem, 60)
-    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+    out = fmt_time(sec)
+    return None if out == "–" else out
 
 
 def _fmt_pace(sec_per_km: float | None) -> str | None:
-    if not sec_per_km or sec_per_km <= 0:
-        return None
-    m = int(sec_per_km // 60)
-    s = int(round(sec_per_km % 60))
-    return f"{m}:{s:02d} /km"
+    out = fmt_pace(sec_per_km)
+    return None if out == "–" else out
 
 
 def _race_row(race: Race) -> dict:

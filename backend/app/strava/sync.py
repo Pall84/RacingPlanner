@@ -1,14 +1,18 @@
 import asyncio
 import json
+import logging
 import time
 from datetime import datetime
 
+import httpx
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 
 from app.models.schema import Activity, ActivityStream, Lap
-from app.strava.auth import get_valid_token
+from app.strava.auth import StravaAuthRevoked, get_valid_token
 from app.strava.client import StravaClient
+
+log = logging.getLogger("racingplanner.strava.sync")
 
 RUN_TYPES = {"Run", "TrailRun", "VirtualRun", "Hike", "Walk"}
 
@@ -162,8 +166,17 @@ async def sync_streams(db, activity_id: int, athlete_id: int, progress_queue=Non
             await db.execute(stmt)
         if activity:
             activity.laps_synced = 1
-    except Exception:
-        pass  # Laps are optional
+    except StravaAuthRevoked:
+        # Propagate — a revoked token is not "laps are optional", it means
+        # the whole sync should halt and the user needs to reauthorize.
+        raise
+    except (httpx.HTTPStatusError, httpx.RequestError, KeyError, ValueError) as e:
+        # Laps are optional; a missing/malformed response for them shouldn't
+        # fail the activity sync. Log so we can see the pattern if it recurs.
+        log.warning(
+            "laps sync failed for activity=%s: %s: %s",
+            activity_id, type(e).__name__, e,
+        )
 
     await db.flush()
     return True
@@ -242,8 +255,13 @@ async def refresh_activity(db, activity_id: int, athlete_id: int) -> bool:
             )
             await db.execute(stmt)
         activity.streams_synced = 1
-    except Exception:
-        pass
+    except StravaAuthRevoked:
+        raise  # See laps-catch comment: reauth should halt the refresh.
+    except (httpx.HTTPStatusError, httpx.RequestError, KeyError, ValueError) as e:
+        log.warning(
+            "stream refresh failed for activity=%s: %s: %s",
+            activity_id, type(e).__name__, e,
+        )
 
     # Re-sync laps, preserving user corrections
     try:
@@ -299,8 +317,13 @@ async def refresh_activity(db, activity_id: int, athlete_id: int) -> bool:
                 db.add(new_lap)
 
         activity.laps_synced = 1
-    except Exception:
-        pass
+    except StravaAuthRevoked:
+        raise
+    except (httpx.HTTPStatusError, httpx.RequestError, KeyError, ValueError) as e:
+        log.warning(
+            "lap refresh failed for activity=%s: %s: %s",
+            activity_id, type(e).__name__, e,
+        )
 
     activity.metrics_computed = 0
     await db.flush()
