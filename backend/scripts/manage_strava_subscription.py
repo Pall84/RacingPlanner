@@ -46,19 +46,28 @@ SUBSCRIPTIONS_URL = "https://www.strava.com/api/v3/push_subscriptions"
 
 
 def _load_env() -> tuple[str, str, str]:
-    # Look for .env in the backend dir (same one the backend reads).
-    backend_env = Path(__file__).resolve().parents[1] / ".env"
-    if backend_env.exists():
+    # Look for .env in either the backend dir OR the repo root (where this
+    # repo historically keeps its single .env). First match wins; both
+    # supported so the script works regardless of layout.
+    here = Path(__file__).resolve()
+    candidates = [
+        here.parents[1] / ".env",  # backend/.env
+        here.parents[2] / ".env",  # repo-root/.env
+    ]
+    for env_path in candidates:
+        if not env_path.exists():
+            continue
         try:
             from dotenv import load_dotenv  # noqa: I001
-            load_dotenv(backend_env)
+            load_dotenv(env_path)
         except ImportError:
             # Fallback: read KEY=VALUE lines ourselves. Keeps this script
             # runnable without python-dotenv installed locally.
-            for line in backend_env.read_text().splitlines():
+            for line in env_path.read_text().splitlines():
                 if line and not line.startswith("#") and "=" in line:
                     k, v = line.split("=", 1)
                     os.environ.setdefault(k.strip(), v.strip())
+        break
 
     client_id = os.environ.get("STRAVA_CLIENT_ID", "")
     client_secret = os.environ.get("STRAVA_CLIENT_SECRET", "")
@@ -96,7 +105,7 @@ def cmd_list() -> None:
 
 def cmd_create(callback_url: str) -> None:
     client_id, client_secret, verify_token = _load_env()
-    print(f"Creating subscription → {callback_url}")
+    print(f"Creating subscription -> {callback_url}")
     print("Strava will do a GET handshake against this URL right now. It must "
           "be reachable and the deployed app must have the SAME verify token.")
     resp = httpx.post(
