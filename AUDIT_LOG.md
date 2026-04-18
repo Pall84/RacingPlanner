@@ -23,6 +23,52 @@ Human still triages and dismisses.
 
 ---
 
+## 2026-04-18 — Audit pass 3
+
+Scope: frontend security + resource lifecycle, backend input validation,
+external API resilience, observability. Four parallel `Explore` agents
+with narrow rubrics that explicitly skipped the "dismissed" items from
+pass 2. Advisor triage cut the ship list roughly in half — trimmed a lot
+of observability-logging proposals as "add when debugging, not proactively".
+
+### Fixed
+
+| File | Fix | Commit |
+|------|-----|--------|
+| `backend/app/main.py` `/health` | Returns HTTP 503 when DB is unreachable instead of 200 with `database: error`. Render's liveness probe now actually detects DB outages and restarts the container. Advisor flagged this as the most operationally important item of the pass. | `80c9fe0` |
+| `backend/app/api/routes_auth.py` `ProfileUpdateRequest` | Pydantic `Field(..., ge=N, le=M)` bounds on weight (25-250 kg), height (100-230 cm), max_hr (100-250), resting_hr (25-120), ftp_watts (>0 <=600). Prevents garbage like weight=-1 corrupting downstream TRIMP/VDOT math. | `80c9fe0` |
+| `backend/app/api/routes_activities.py` | `limit` bounded 1-500, `offset` 0-100k. `LapCorrectionRequest` distance >0, elevation >=0. Prevents DoS via huge limit and pace crashes on negative lap corrections. | `80c9fe0` |
+| `backend/app/api/routes_fitness.py`, `routes_garmin.py` | `weeks` 1-260 (5yr cap), `days` 1-3650 (10yr cap) on all query params. Prevents `timedelta` overflow on absurd values and negative-date underflow on -N. | `80c9fe0` |
+| `backend/app/api/routes_goals.py` `GoalCreateRequest` | `target_value > 0`, `<= 1_000_000`. Line 73 divides `current / target_value * 100` — zero target would crash, negative gives nonsense progress %. | `80c9fe0` |
+| `backend/app/api/routes_races.py` `RaceUpdateRequest` | `actual_time_sec > 0 <= 48h`. Defensive date parse in readiness endpoint — wraps `date.fromisoformat(race.date[:10])` in try/except; a corrupted race.date was crashing with a raw 500. | `80c9fe0` |
+| Frontend XSS — new `frontend/js/util.js` with `escapeHtml()` helper | Applied to activity.name in detail + list, race.name + location + date in list + detail, aid station name + notes in edit + display + Leaflet popup. All previously interpolated raw into innerHTML — malicious activity/race/station names could trigger XSS. | `72c486b` |
+| `backend/app/strava/auth.py` + `app/api/_errors.py` + `routes_sync.py` | New `StravaAuthRevoked` domain exception. `get_valid_token` catches 400/401 from refresh_access_token and raises it. `translate_strava_error` maps it to 401 with "please log out and log back in" message. SSE background task surfaces the same friendly message. Previously was a raw "HTTPStatusError" in the SSE error path. | `058d409` |
+| `backend/app/garmin/client.py` `login()` | Wrapped `asyncio.to_thread(_do_login)` in `asyncio.wait_for(timeout=30)`. python-garminconnect has no built-in HTTP timeout; a hung login could starve Render's small thread pool and block concurrent requests. Caveat documented: wait_for cancels the coroutine but can't cancel the Python thread (no thread-cancellation primitive). | `058d409` |
+
+### Deferred (real but lower priority — revisit when triggered)
+
+| Finding | Reason |
+|---------|--------|
+| Strava sync page-level transaction boundaries | Real — if page 3 of 10 crashes mid-insert, state can be inconsistent. But no observed corruption and the fix is complex (`begin_nested` savepoints). Revisit if we see real user reports. |
+| Strava 429 retry counter | Current 30s backoff cap already prevents runaway recursion. Defensive only. |
+| `setTimeout` tracking in `activity_list.js` sync reset | Theoretical race — navigating during the 2s window. Low impact. |
+| OAuth token-exchange timeout 20s → 10s | No user pain observed. Keep current. |
+
+### Dismissed (already handled or not worth fixing)
+
+| Finding | Why it's not a bug |
+|---------|---------------------|
+| `confirm("Delete $name?")` with unescaped name | `confirm()` renders plain text, not HTML. Not an XSS vector. |
+| Chart.js / Leaflet instance leaks | Checked — `destroyChart()` and `_map.remove()` are called on re-render. Clean. |
+| Event listener accumulation across navigations | Checked — observers are disconnected in `resetAndReload()`. Clean. |
+| Observability context log proposals (7 findings from agent D) | Advisor guidance: "add logs when actually debugging, not proactively. Proactive logs are noise; reactive logs are signal." Dismiss. |
+| 429 jitter, auth exception narrowing, stream-auth-swallow, weather 5s timeout | None have user-facing evidence. Nice-to-haves. |
+| Partial Garmin per-day error isolation (already has try/except) | Current pattern is OK; agent wanted per-endpoint context logs which is "add when debugging" territory. |
+| GPX XXE / entity-expansion | `xml.etree.ElementTree` disables external entities by default since Python 3.7.1. Safe. |
+| Admin.js user list rendering | Already uses `esc()` helper. Clean. |
+
+---
+
 ## 2026-04-18 — Audit pass 2
 
 Scope: backend security, concurrency/DB, analytics correctness, data integrity +
