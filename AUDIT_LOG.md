@@ -23,6 +23,51 @@ Human still triages and dismisses.
 
 ---
 
+## 2026-04-18 — Audit pass 4
+
+Scope: backend code quality (dead code, duplication, complexity), frontend
+code quality (inline styles, duplication), mobile UX, deploy/ops config.
+Four parallel `Explore` agents + advisor triage. Advisor cut roughly
+half of the proposed findings — mostly large refactors with no observed
+user pain ("split buildDetailUI", "de-duplicate sync_streams") and
+config polish ("VITE_API_BASE in netlify.toml", "README .gitignore reminder").
+
+### Fixed
+
+| File | Fix | Commit |
+|------|-----|--------|
+| `frontend/js/util.js` + 4 page files | Extracted duplicated `fmtTime` + `fmtPace` to util.js. `activity_detail.js`, `dashboard.js`, `profile.js`, `races.js` now import the canonical versions. `activity_list.js` keeps its local `fmtTime` because the output shape (`Xh Ym`) is intentionally different from the canonical (`X:YY:ZZ`). | `927ecc1` |
+| `backend/app/analytics/formatters.py` (new) + `routes_races.py` + `race_predictor.py` | New `fmt_time` / `fmt_pace` module. Two near-identical copies in routes_races and race_predictor now delegate via thin aliases that preserve each file's nullability convention (None vs "–"). | `6ed9c74` |
+| `backend/app/strava/sync.py` lines 165, 245, 302 | Three `except Exception: pass` blocks that were silently swallowing every error including `StravaAuthRevoked`. Narrowed to `(HTTPStatusError, RequestError, KeyError, ValueError)` with structured logging, and explicit `raise` for auth-revocation so the sync halts cleanly and reaches the user's SSE queue with the good reauth message. | `6ed9c74` |
+| `backend/app/garmin/sync.py` line 215 | Per-endpoint Garmin catch stays `Exception` (python-garminconnect raises a zoo of undocumented types) but gains an `INFO` log with endpoint name + athlete_id + date + exception class. The failure pattern is now visible in Render logs. | `6ed9c74` |
+| `frontend/index.html`, `css/styles.css`, `js/app.js`, plus dashboard + activity_detail | **Baseline mobile responsiveness.** Off-canvas hamburger sidebar at ≤768px, reduced padding, collapsed 2-col grids to 1-col, wide data-tables now scroll horizontally inside their card instead of forcing whole-page scroll. Recovery Context 6-col row collapses to 3 (tablet) → 2 (phone). All rules are additive and gated to ≤768px; desktop layout unchanged. | `87162b6` |
+
+### Deferred (real but not worth the cost right now)
+
+| Finding | Reason |
+|---------|--------|
+| Split `races.js::buildDetailUI` (~1100 lines) | Advisor: "no observed bug, huge diff, the cost of getting it wrong dwarfs the benefit. Revisit only when you're actively making changes to races.js." |
+| De-duplicate `refresh_activity` and `sync_streams` in `strava/sync.py` | Core sync path, real risk of regressing treadmill-correction preservation (which was just stabilized). Revisit if the code actively needs touching. |
+| Replace 99+ hardcoded `#8892a4` etc. with `var(--muted)` in `races.js` | No user impact, mechanical but huge. Only worth doing alongside a theme change. |
+| Other inline `1fr 1fr` grids on fitness/trends/settings/profile pages on mobile | Still overflow at <=640px. Follow-up pass if those pages get real phone use — the current dashboard + activities + races mobile fix covers the most-visited paths. |
+| Loose dep pinning in `pyproject.toml` / missing `uv.lock` | Real gap but builds haven't broken. Add `uv.lock` when setting up a real CI matrix or when a build breaks. |
+| No frontend CI (`npm run build` on PR) | Low-volume single-dev project. Deploy fails loudly enough. Add when second contributor lands. |
+
+### Dismissed
+
+| Finding | Why not |
+|---------|---------|
+| Auth pattern `_get_athlete_id` vs `Depends(get_current_athlete)` | Both work. Unifying is a large diff with zero user impact — cosmetic. |
+| `_int_or_none` helper only in `garmin/sync.py` | Not worth promoting until a second callsite needs it. |
+| `predict_race_time` is >100 lines | Advisor confirmed: it's sequential step code, not hidden complexity. Length is honest. |
+| Dockerfile `sh -c` entrypoint "fragility" | USER directive is correct today; "what if someone moves it" is hypothetical. Fine. |
+| `VITE_API_BASE` not in `netlify.toml` | Value is set via Netlify env UI + GitHub Actions. Adding to `netlify.toml` would be a placeholder, not useful. |
+| `pre-commit autoupdate`, render.yaml `LOG_LEVEL` clarity, docker-compose password comment, README `.gitignore` reminder, CORS debug logs | Advisor called these noise. Dismissed. |
+| Mobile polish items (modal width, aid-station inputs, chart min-height, strategy modal) | "Polish on top of a foundation that doesn't exist yet" — ship the foundation first. |
+| Banner/alert HTML duplication + card patterns (~6 findings) | Real but mechanical. Worth a dedicated refactor pass when actively editing those pages; not enough pain to justify standalone work. |
+
+---
+
 ## 2026-04-18 — Audit pass 3
 
 Scope: frontend security + resource lifecycle, backend input validation,
