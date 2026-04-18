@@ -46,7 +46,25 @@ class GarminClient:
             client.login(tokenstore=str(self._tokenstore))
             return client
 
-        self._client = await asyncio.to_thread(_do_login)
+        # The python-garminconnect library is synchronous and has no built-in
+        # timeout on its HTTP calls. If Garmin's server hangs during login,
+        # the thread would block forever — and since Python's default thread
+        # pool is small (5-10 threads on Render), a few stuck logins could
+        # starve the pool and block every concurrent request.
+        #
+        # Caveat: asyncio.wait_for cancels the awaiting coroutine but CANNOT
+        # cancel the underlying thread — Python has no thread-cancellation
+        # primitive. At small scale the leaked thread is fine; if we ever
+        # see repeated Garmin hangs, we'll need a per-user connection lock.
+        try:
+            self._client = await asyncio.wait_for(
+                asyncio.to_thread(_do_login),
+                timeout=30,
+            )
+        except asyncio.TimeoutError as e:
+            raise TimeoutError(
+                "Garmin login timed out after 30s — check Garmin Connect status"
+            ) from e
 
     def _ensure_client(self) -> Garmin:
         if self._client is None:

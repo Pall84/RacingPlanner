@@ -77,9 +77,14 @@ async def full_sync(
         # Errors here can't reach the user synchronously — the HTTP response
         # has already returned. Report them via the SSE progress queue so the
         # frontend can show them, and close the stream cleanly with DONE.
+        from app.strava.auth import StravaAuthRevoked
         try:
             async with async_session() as session:
                 await run_full_pipeline(session, athlete_id, q, full_sync=True)
+        except StravaAuthRevoked:
+            log.warning("Strava auth revoked for athlete %s — sync halted", athlete_id)
+            await q.put("ERROR: Strava access was revoked. Please log out and log back in.")
+            await q.put("DONE")
         except Exception as e:  # noqa: BLE001
             log.exception("Full sync pipeline crashed for athlete %s", athlete_id)
             await q.put(f"ERROR: Pipeline failed: {type(e).__name__}: {e}")

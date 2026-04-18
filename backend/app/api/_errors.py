@@ -22,6 +22,7 @@ log = logging.getLogger("racingplanner.errors")
 def translate_strava_error(e: Exception, action: str = "call Strava") -> HTTPException:
     """Map a Strava-call exception to an HTTPException with useful detail.
 
+    - StravaAuthRevoked                         → 401 (user revoked app access)
     - RuntimeError from our rate limiter        → 429
     - httpx.HTTPStatusError 401                 → 401 (tell user to re-login)
     - httpx.HTTPStatusError 404                 → 404 (activity missing upstream)
@@ -29,6 +30,14 @@ def translate_strava_error(e: Exception, action: str = "call Strava") -> HTTPExc
     - httpx.RequestError (network/timeout)       → 502 (transient)
     - Anything else                              → 500
     """
+    # Domain exception from get_valid_token — user revoked the app's access.
+    from app.strava.auth import StravaAuthRevoked
+    if isinstance(e, StravaAuthRevoked):
+        return HTTPException(
+            status_code=401,
+            detail="Strava access was revoked. Please log out and log back in.",
+        )
+
     # Our rate limiter raises RuntimeError with "rate limit" in the message.
     if isinstance(e, RuntimeError) and "rate limit" in str(e).lower():
         return HTTPException(status_code=429, detail=str(e))
