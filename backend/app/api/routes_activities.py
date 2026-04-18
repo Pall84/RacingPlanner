@@ -1,7 +1,7 @@
 import json
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from pydantic import BaseModel
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -80,8 +80,10 @@ def _activity_row(activity: Activity, metrics: ActivityMetrics | None) -> dict:
 
 
 class LapCorrectionRequest(BaseModel):
-    corrected_distance_km: float | None = None   # None → reset correction
-    corrected_elevation_gain: float | None = None  # None → reset correction
+    # None = reset correction. Positive bounds prevent a user from saving
+    # nonsense like negative distance (would break pace calculations).
+    corrected_distance_km: float | None = Field(None, gt=0, le=200)
+    corrected_elevation_gain: float | None = Field(None, ge=0, le=5000)
 
 
 def _lap_row(lap: Lap) -> dict:
@@ -115,8 +117,11 @@ def _lap_row(lap: Lap) -> dict:
 @router.get("")
 async def list_activities(
     request: Request,
-    limit: int = 50,
-    offset: int = 0,
+    # 500-row hard cap prevents a malicious client from requesting millions
+    # of rows and swamping the connection; offset is bounded at 100k which
+    # is well beyond any realistic scroll depth (2k activities × 50/page).
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0, le=100_000),
     races_only: bool = False,
     db: AsyncSession = Depends(get_db),
 ):

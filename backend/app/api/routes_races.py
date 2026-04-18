@@ -2,7 +2,7 @@ import json
 import time
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -246,7 +246,9 @@ class RaceUpdateRequest(BaseModel):
     location: str | None = None
     notes: str | None = None
     linked_activity_id: int | None = None
-    actual_time_sec: int | None = None
+    # Cap at 48h — covers every realistic ultra finish; negative or zero
+    # would make the backtest comparison (actual vs predicted) meaningless.
+    actual_time_sec: int | None = Field(None, gt=0, le=172800)
     plan_strategy: str | None = None
     nutrition_settings: dict | None = None
 
@@ -488,7 +490,12 @@ async def get_race_readiness(
     from datetime import timedelta
 
     from app.models.schema import GarminDailyHealth
-    race_d = _date.fromisoformat(race.date[:10])
+    # race.date is user-supplied (create/PATCH) so a corrupted value would
+    # crash this endpoint with a raw 500. Fail cleanly with "not available".
+    try:
+        race_d = _date.fromisoformat(race.date[:10])
+    except (TypeError, ValueError):
+        return {"available": False, "reason": "race date malformed"}
     start_d = (race_d - timedelta(days=7)).isoformat()
     end_d = (race_d - timedelta(days=1)).isoformat()
     daily_result = await db.execute(

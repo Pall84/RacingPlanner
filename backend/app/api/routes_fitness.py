@@ -1,6 +1,6 @@
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import desc, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -66,7 +66,7 @@ async def get_ctl_atl_tsb(
 @router.get("/weekly")
 async def get_weekly(
     request: Request,
-    weeks: int = 52,
+    weeks: int = Query(52, ge=1, le=260),
     db: AsyncSession = Depends(get_db),
 ):
     athlete_id = _get_athlete_id(request)
@@ -166,7 +166,7 @@ async def get_personal_records(
 @router.get("/aerobic_efficiency")
 async def get_aerobic_efficiency(
     request: Request,
-    weeks: int = 26,
+    weeks: int = Query(26, ge=1, le=260),
     db: AsyncSession = Depends(get_db),
 ):
     athlete_id = _get_athlete_id(request)
@@ -364,7 +364,7 @@ async def get_summary(
 @router.get("/training_distribution")
 async def get_training_distribution(
     request: Request,
-    weeks: int = 12,
+    weeks: int = Query(12, ge=1, le=260),
     db: AsyncSession = Depends(get_db),
 ):
     """Workout type distribution over the last N weeks."""
@@ -414,7 +414,7 @@ async def get_training_distribution(
 @router.get("/performance_trends")
 async def get_performance_trends(
     request: Request,
-    weeks: int = 52,
+    weeks: int = Query(52, ge=1, le=260),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -663,7 +663,7 @@ async def get_pace_zones(
 @router.get("/recovery_history")
 async def get_recovery_history(
     request: Request,
-    days: int = 90,
+    days: int = Query(90, ge=1, le=3650),
     db: AsyncSession = Depends(get_db),
 ):
     """Daily readiness scores blending TSB + Garmin health data."""
@@ -750,7 +750,7 @@ async def get_recovery_history(
 @router.get("/health_correlations")
 async def get_health_correlations(
     request: Request,
-    weeks: int = 26,
+    weeks: int = Query(26, ge=1, le=260),
     db: AsyncSession = Depends(get_db),
 ):
     """Correlation datasets: sleep vs EF, HRV vs VDOT, resting HR vs RSS."""

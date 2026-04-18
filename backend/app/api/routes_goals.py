@@ -5,7 +5,7 @@ import time
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -124,7 +124,10 @@ async def list_goals(
 
 class GoalCreateRequest(BaseModel):
     goal_type: str      # weekly_distance, annual_distance, weekly_runs, race_time
-    target_value: float
+    # Positive target prevents div-by-zero + nonsense progress percentages
+    # downstream (line 73 does current / target_value * 100). Upper bound
+    # is permissive — accommodates marathon finish targets in seconds.
+    target_value: float = Field(..., gt=0, le=1_000_000)
     target_unit: str | None = None
     target_date: str | None = None
     race_id: int | None = None

@@ -98,12 +98,22 @@ async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSON
 
 
 @app.get("/health")
-async def health() -> dict:
+async def health() -> JSONResponse:
+    """Health check for Render's auto-restart.
+
+    Returns HTTP 503 when the DB is unreachable so Render actually restarts
+    the container instead of leaving a broken instance serving traffic.
+    Previously returned 200 with `database: error`, which Render's liveness
+    probe happily accepted — the container stayed broken until manual redeploy.
+    """
     try:
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
-        db_status = "connected"
+        return JSONResponse(
+            content={"status": "ok", "database": "connected"}, status_code=200,
+        )
     except Exception as e:  # noqa: BLE001
         log.warning("DB health check failed: %s", e)
-        db_status = "error"
-    return {"status": "ok", "database": db_status}
+        return JSONResponse(
+            content={"status": "degraded", "database": "error"}, status_code=503,
+        )

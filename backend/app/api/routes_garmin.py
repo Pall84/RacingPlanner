@@ -4,7 +4,7 @@ Garmin Connect API routes — connect/disconnect, sync trigger, health data.
 import time
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import desc, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -222,7 +222,7 @@ async def get_health_latest(
 @router.get("/health/trends")
 async def get_health_trends(
     request: Request,
-    days: int = 90,
+    days: int = Query(90, ge=1, le=3650),
     db: AsyncSession = Depends(get_db),
 ):
     """Arrays suitable for chart rendering."""

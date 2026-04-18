@@ -14,7 +14,7 @@ import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -262,14 +262,18 @@ async def status_endpoint(request: Request, db: AsyncSession = Depends(get_db)):
 
 
 class ProfileUpdateRequest(BaseModel):
-    weight: float | None = None
-    date_of_birth: str | None = None
-    height_cm: float | None = None
-    max_hr: int | None = None
-    resting_hr: int | None = None
-    ftp_watts: float | None = None
-    hr_zone_method: str | None = None
-    trimp_gender: str | None = None
+    # Physiological bounds — reject obvious garbage like negative weights or
+    # 9999 bpm max HR. All fields stay optional (None = leave unchanged).
+    # Bounds are intentionally permissive — covers competitive youth through
+    # masters athletes. Tighten further only if we see bad data.
+    weight: float | None = Field(None, ge=25, le=250)           # kg
+    date_of_birth: str | None = None                             # ISO "YYYY-MM-DD"; format-validated below
+    height_cm: float | None = Field(None, ge=100, le=230)        # cm
+    max_hr: int | None = Field(None, ge=100, le=250)             # bpm
+    resting_hr: int | None = Field(None, ge=25, le=120)          # bpm
+    ftp_watts: float | None = Field(None, gt=0, le=600)          # W
+    hr_zone_method: str | None = None                            # validated against enum below
+    trimp_gender: str | None = None                              # validated against enum below
 
 
 @router.patch("/auth/profile")
