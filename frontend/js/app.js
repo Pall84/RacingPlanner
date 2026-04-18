@@ -59,6 +59,9 @@ async function loadPage(path) {
 
 function navigate(path, pushState = true) {
   if (pushState) history.pushState({}, "", path);
+  // Close the mobile nav drawer on navigation. Desktop isn't affected
+  // because `.nav-open` has no visual effect above 768px.
+  document.body.classList.remove("nav-open");
   loadPage(path);
 }
 
@@ -75,6 +78,24 @@ document.addEventListener("click", (e) => {
 window.addEventListener("popstate", () => navigate(location.pathname, false));
 
 window.navigate = navigate;
+
+// ── Mobile navigation toggle ─────────────────────────────────────────────────
+// The hamburger button (#nav-toggle) and backdrop (#nav-backdrop) are defined
+// in index.html and CSS-hidden on desktop. On mobile, clicking the hamburger
+// slides the sidebar in via the body.nav-open class. Tapping the backdrop
+// or navigating closes it. Bound once at boot — no per-page rebinding.
+const navToggle = document.getElementById("nav-toggle");
+const navBackdrop = document.getElementById("nav-backdrop");
+if (navToggle) {
+  navToggle.addEventListener("click", () => {
+    document.body.classList.toggle("nav-open");
+  });
+}
+if (navBackdrop) {
+  navBackdrop.addEventListener("click", () => {
+    document.body.classList.remove("nav-open");
+  });
+}
 
 // ── Signup page (from invite link) ───────────────────────────────────────────
 // Invite flow: admin shares <site>/signup?invite=XXX. We intercept that

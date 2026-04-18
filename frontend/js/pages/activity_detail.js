@@ -73,7 +73,7 @@ export async function render(container, activityId) {
     <!-- Recovery Context -->
     <div style="background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.15);border-radius:8px;padding:12px 16px;margin-bottom:24px">
       <div style="font-size:12px;color:#22c55e;font-weight:600;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px">Recovery Context — Morning of ${recoveryCtx.date}</div>
-      <div class="cards-grid" style="grid-template-columns:repeat(6,1fr);gap:8px">
+      <div class="cards-grid recovery-ctx-grid" style="gap:8px">
         <div class="card" style="padding:8px 10px"><div class="card-label" style="font-size:10px">Body Battery</div><div class="card-value" style="font-size:18px">${recoveryCtx.body_battery ?? "–"}</div></div>
         <div class="card" style="padding:8px 10px"><div class="card-label" style="font-size:10px">HRV</div><div class="card-value" style="font-size:18px">${recoveryCtx.hrv_last_night != null ? Math.round(recoveryCtx.hrv_last_night) : "–"}<span style="font-size:11px;color:var(--muted)"> ms</span></div></div>
         <div class="card" style="padding:8px 10px"><div class="card-label" style="font-size:10px">Sleep</div><div class="card-value" style="font-size:18px">${recoveryCtx.sleep_hours != null ? recoveryCtx.sleep_hours.toFixed(1) : "–"}<span style="font-size:11px;color:var(--muted)"> hrs</span></div></div>

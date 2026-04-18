@@ -117,7 +117,7 @@ export async function render(container) {
       </div>
     </div>
 
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:24px">
+    <div class="grid-2col" style="margin-bottom:24px">
       <div class="chart-section">
         <div class="chart-title">Fitness / Fatigue / Form (90 days)</div>
         <div class="chart-wrap"><canvas id="ctl-chart" height="160"></canvas></div>

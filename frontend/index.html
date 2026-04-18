@@ -12,6 +12,10 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 </head>
 <body>
+  <!-- Mobile-only hamburger (hidden on >768px via CSS). Toggles
+       `body.nav-open` which slides the sidebar in from the left. -->
+  <button id="nav-toggle" aria-label="Toggle navigation">☰</button>
+  <div id="nav-backdrop" aria-hidden="true"></div>
   <nav id="sidebar">
     <div class="nav-header">
       <span class="nav-logo">&#9679; RacingPlanner</span>
