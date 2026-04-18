@@ -1,3 +1,5 @@
+import { escapeHtml } from "./util.js";
+
 let _map = null;
 
 // Zone colors: Z1 gray, Z2 blue, Z3 green, Z4 yellow-orange, Z5 red
@@ -176,7 +178,13 @@ export function renderActivityMap(
         const idx = (lo > 0 && Math.abs(cumDist[lo - 1] - targetM) < Math.abs(cumDist[lo] - targetM)) ? lo - 1 : lo;
         pos = latlngStream[idx];
       }
-      const label = `<b>⛺ ${as.name}</b><br>${as.distance_km} km${as.notes ? "<br><span style='color:#ccc'>" + as.notes + "</span>" : ""}`;
+      // Leaflet's bindPopup() renders HTML. Aid station name/notes are
+      // user-provided (edited via the Course tab UI); unescaped, they allow
+      // an attacker to run JS by naming their station `<img src=x onerror=...>`
+      // and tricking someone into viewing the race. Escape both.
+      const label = `<b>⛺ ${escapeHtml(as.name)}</b><br>${as.distance_km} km${
+        as.notes ? "<br><span style='color:#ccc'>" + escapeHtml(as.notes) + "</span>" : ""
+      }`;
       L.circleMarker(pos, {
         radius: 8,
         fillColor: "#facc15",

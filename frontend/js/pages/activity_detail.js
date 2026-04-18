@@ -1,4 +1,5 @@
 import { api } from "../api.js";
+import { escapeHtml } from "../util.js";
 import {
   renderZoneChart, renderHRStream, renderPaceStream,
   renderKmSplits, renderCadenceHistogram, renderPowerStream,
@@ -51,7 +52,7 @@ export async function render(container, activityId) {
 
     <div class="activity-header" style="display:flex;justify-content:space-between;align-items:flex-start">
       <div>
-        <h1>${activity.name || "Run"}${activity.is_race ? ' <span style="font-size:0.65em;vertical-align:middle;background:#3b1f1f;color:#f87171;border:1px solid #5a2a2a;padding:2px 8px;border-radius:4px;margin-left:8px">🏁 RACE</span>' : ""}</h1>
+        <h1>${escapeHtml(activity.name || "Run")}${activity.is_race ? ' <span style="font-size:0.65em;vertical-align:middle;background:#3b1f1f;color:#f87171;border:1px solid #5a2a2a;padding:2px 8px;border-radius:4px;margin-left:8px">🏁 RACE</span>' : ""}</h1>
         <div class="meta">${date} &nbsp;·&nbsp; ${activity.type || "Run"}${activity.workout_type ? ` &nbsp;·&nbsp; <span class="badge badge-blue">${activity.workout_type.replace(/_/g, " ")}</span>` : ""}${activity.treadmill_corrected ? ' &nbsp;·&nbsp; <span class="badge badge-yellow">treadmill corrected</span>' : ""}</div>
       </div>
       <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">

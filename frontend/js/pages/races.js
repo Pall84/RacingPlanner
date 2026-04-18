@@ -1,6 +1,7 @@
 import { api } from "../api.js";
 import { renderElevationProfile, renderPredictionTrend, renderStrategyComparison } from "../charts.js";
 import { renderActivityMap } from "../map.js";
+import { escapeHtml } from "../util.js";
 
 // ── Formatting helpers ────────────────────────────────────────────────────────
 
@@ -207,8 +208,8 @@ function raceCard(r, isPast = false) {
     <a href="/races/${r.id}" class="race-card-link" style="text-decoration:none">
       <div style="background:#1e2235;border-radius:10px;padding:1.25rem 1.5rem;display:grid;grid-template-columns:1fr auto;gap:0.75rem;align-items:start;border:1px solid ${isPast ? "#2e3348" : "#3b4a6b"};transition:border-color 0.15s" onmouseover="this.style.borderColor='#4f7cff'" onmouseout="this.style.borderColor='${isPast ? "#2e3348" : "#3b4a6b"}'">
         <div>
-          <div style="font-size:1.05rem;font-weight:600;color:#e2e8f0;margin-bottom:0.25rem">${r.name}</div>
-          <div style="font-size:0.85rem;color:#8892a4">${r.date}${r.location ? ` · ${r.location}` : ""}</div>
+          <div style="font-size:1.05rem;font-weight:600;color:#e2e8f0;margin-bottom:0.25rem">${escapeHtml(r.name)}</div>
+          <div style="font-size:0.85rem;color:#8892a4">${escapeHtml(r.date)}${r.location ? ` · ${escapeHtml(r.location)}` : ""}</div>
           <div style="display:flex;gap:1.5rem;margin-top:0.75rem;flex-wrap:wrap">
             ${r.distance_km ? `<span style="color:#e2e8f0;font-size:0.9rem">${r.distance_km} km</span>` : ""}
             ${r.total_elevation_gain ? `<span style="color:#facc15;font-size:0.9rem">↑ ${Math.round(r.total_elevation_gain)} m</span>` : ""}
@@ -264,9 +265,9 @@ function buildDetailUI(container, race) {
 
     <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:1rem;margin-bottom:1.5rem">
       <div>
-        <h1 style="margin:0 0 0.25rem">${race.name}</h1>
+        <h1 style="margin:0 0 0.25rem">${escapeHtml(race.name)}</h1>
         <div style="color:#8892a4;font-size:0.9rem">
-          ${race.date}${race.location ? ` · ${race.location}` : ""}
+          ${escapeHtml(race.date)}${race.location ? ` · ${escapeHtml(race.location)}` : ""}
           ${race.distance_km ? ` · ${race.distance_km} km` : ""}
           ${race.total_elevation_gain ? ` · ↑ ${Math.round(race.total_elevation_gain)} m` : ""}
           ${race.total_elevation_loss ? ` ↓ ${Math.round(race.total_elevation_loss)} m` : ""}
@@ -709,9 +710,9 @@ function buildAidStationListHtml(stations, editIdx = -1) {
       return `
         <div style="display:flex;align-items:center;gap:0.5rem;padding:0.45rem 0;border-bottom:1px solid #2e3348;flex-wrap:wrap">
           <span style="color:#facc15;font-size:1rem">⛺</span>
-          <input data-edit-name value="${as.name.replace(/"/g,'&quot;')}" placeholder="Name" style="${inputStyle};flex:1;min-width:100px">
+          <input data-edit-name value="${escapeHtml(as.name)}" placeholder="Name" style="${inputStyle};flex:1;min-width:100px">
           <input data-edit-dist type="number" value="${as.distance_km}" step="0.1" min="0.1" placeholder="km" style="${inputStyle};width:70px">
-          <input data-edit-notes value="${(as.notes||'').replace(/"/g,'&quot;')}" placeholder="Notes" style="${inputStyle};flex:1;min-width:80px">
+          <input data-edit-notes value="${escapeHtml(as.notes || '')}" placeholder="Notes" style="${inputStyle};flex:1;min-width:80px">
           <input data-edit-lat type="number" value="${as.lat ?? ''}" step="0.0001" placeholder="Lat" title="Latitude (optional — for map pin)" style="${inputStyle};width:75px">
           <input data-edit-lon type="number" value="${as.lon ?? ''}" step="0.0001" placeholder="Lon" title="Longitude (optional — for map pin)" style="${inputStyle};width:75px">
           <label style="${chkLabelStyle}"><input data-edit-water type="checkbox" ${hasWater ? "checked" : ""}>💧 Water</label>
@@ -725,14 +726,14 @@ function buildAidStationListHtml(stations, editIdx = -1) {
     return `
       <div style="display:flex;align-items:center;gap:0.75rem;padding:0.4rem 0;border-bottom:1px solid #2e3348">
         <span style="color:#facc15;font-size:1rem">⛺</span>
-        <span style="flex:1;color:#e2e8f0;font-size:0.9rem">${as.name}</span>
+        <span style="flex:1;color:#e2e8f0;font-size:0.9rem">${escapeHtml(as.name)}</span>
         <span style="color:#8892a4;font-size:0.85rem;font-variant-numeric:tabular-nums">${as.distance_km} km</span>
         <span style="display:inline-flex;gap:0.25rem;align-items:center">
           ${chipHtml(hasWater, "💧", "Water")}
           ${chipHtml(hasFood, "🍌", "Food")}
           ${chipHtml(hasBags, "🎒", "Drop bag")}
         </span>
-        ${as.notes ? `<span style="color:#4b5563;font-size:0.8rem;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${as.notes}">${as.notes}</span>` : ""}
+        ${as.notes ? `<span style="color:#4b5563;font-size:0.8rem;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(as.notes)}">${escapeHtml(as.notes)}</span>` : ""}
         <button data-edit-as="${i}" style="background:none;border:none;color:#4b5563;cursor:pointer;font-size:0.85rem;padding:0 0.2rem;line-height:1" title="Edit">✎</button>
         <button data-delete-as="${i}" style="background:none;border:none;color:#4b5563;cursor:pointer;font-size:1rem;padding:0 0.2rem;line-height:1" title="Remove">✕</button>
       </div>`;

@@ -1,4 +1,5 @@
 import { api } from "../api.js";
+import { escapeHtml } from "../util.js";
 
 const PAGE_SIZE = 50;
 
@@ -23,8 +24,8 @@ function rowHtml(a) {
   return `
     <tr onclick="navigate('/activity/${a.id}')">
       <td class="muted">${(a.start_date_local || a.start_date || "").slice(0, 10)}</td>
-      <td>${a.name || "Run"}${raceBadge}</td>
-      <td><span class="badge badge-blue">${a.type || "Run"}</span></td>
+      <td>${escapeHtml(a.name || "Run")}${raceBadge}</td>
+      <td><span class="badge badge-blue">${escapeHtml(a.type || "Run")}</span></td>
       <td>${fmtDist(a.distance_m)}</td>
       <td>${fmtTime(a.moving_time)}</td>
       <td>${a.avg_pace_str || "–"}</td>
