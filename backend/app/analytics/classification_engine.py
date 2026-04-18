@@ -36,6 +36,14 @@ def classify_workout(
     Returns one of:
         race, vo2max_intervals, threshold, tempo, long_run, moderate, recovery, easy
     """
+    # Defensive cast: asyncpg returns AVG() as decimal.Decimal, and Python
+    # refuses float × Decimal arithmetic (raises TypeError). Every callsite
+    # today remembers to float() these, but that's a fragile convention —
+    # if someone forgets, classify runs fine until it hits the "long run"
+    # branch and crashes. Coerce here so the function is safe regardless.
+    recent_avg_duration = float(recent_avg_duration or 0)
+    recent_avg_distance = float(recent_avg_distance or 0)
+
     z1 = metrics.get("z1_seconds") or 0
     z2 = metrics.get("z2_seconds") or 0
     z3 = metrics.get("z3_seconds") or 0

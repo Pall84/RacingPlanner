@@ -274,8 +274,11 @@ async def run_full_pipeline(
         {"aid": athlete_id},
     )
     avg_row = avg_result.one()
-    recent_avg_duration = avg_row[0] or 0
-    recent_avg_distance = avg_row[1] or 0
+    # asyncpg returns AVG() as decimal.Decimal — coerce to float up-front so
+    # downstream `1.3 * recent_avg_duration` arithmetic in classify_workout
+    # doesn't raise TypeError (Python won't auto-multiply float × Decimal).
+    recent_avg_duration = float(avg_row[0]) if avg_row[0] is not None else 0.0
+    recent_avg_distance = float(avg_row[1]) if avg_row[1] is not None else 0.0
 
     # Find activities needing classification
     unclassified = await db.execute(
