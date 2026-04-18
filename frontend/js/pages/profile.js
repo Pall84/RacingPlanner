@@ -1,14 +1,12 @@
 import { api } from "../api.js";
+import { fmtTime } from "../util.js";
 
+// Local: profile deliberately omits the "/km" suffix for compactness
+// in the pace-zones grid — different display convention than util.fmtPace.
 function fmtPace(sec) {
   if (!sec) return "–";
   const m = Math.floor(sec / 60), s = Math.round(sec % 60);
   return `${m}:${String(s).padStart(2, "0")}`;
-}
-function fmtTime(sec) {
-  if (!sec) return "–";
-  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
-  return h > 0 ? `${h}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}` : `${m}:${String(s).padStart(2,"0")}`;
 }
 function calcAge(dob) {
   if (!dob) return null;

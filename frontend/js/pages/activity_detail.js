@@ -1,5 +1,5 @@
 import { api } from "../api.js";
-import { escapeHtml } from "../util.js";
+import { escapeHtml, fmtTime, fmtPace } from "../util.js";
 import {
   renderZoneChart, renderHRStream, renderPaceStream,
   renderKmSplits, renderCadenceHistogram, renderPowerStream,
@@ -7,16 +7,6 @@ import {
 } from "../charts.js";
 import { renderActivityMap } from "../map.js";
 
-function fmtPace(sec) {
-  if (!sec) return "–";
-  const m = Math.floor(sec / 60), s = Math.round(sec % 60);
-  return `${m}:${String(s).padStart(2, "0")} /km`;
-}
-function fmtTime(sec) {
-  if (!sec) return "–";
-  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
-  return h > 0 ? `${h}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}` : `${m}:${String(s).padStart(2,"0")}`;
-}
 function fmtDist(m) { return m ? `${(m / 1000).toFixed(2)} km` : "–"; }
 function decouplingBadge(pct) {
   if (pct === null || pct === undefined) return "–";

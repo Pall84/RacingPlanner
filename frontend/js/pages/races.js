@@ -1,7 +1,7 @@
 import { api } from "../api.js";
 import { renderElevationProfile, renderPredictionTrend, renderStrategyComparison } from "../charts.js";
 import { renderActivityMap } from "../map.js";
-import { escapeHtml } from "../util.js";
+import { escapeHtml, fmtTime as fmtTimeSec } from "../util.js";
 
 // ── Formatting helpers ────────────────────────────────────────────────────────
 
@@ -227,13 +227,9 @@ function raceCard(r, isPast = false) {
   `;
 }
 
-function fmtTimeSec(sec) {
-  if (!sec) return "–";
-  const h = Math.floor(sec / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  const s = Math.round(sec % 60);
-  return h ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${m}:${String(s).padStart(2, "0")}`;
-}
+// fmtTimeSec is imported as an alias of the canonical fmtTime from util.js —
+// the implementation was identical. Alias kept so we don't have to rename
+// ~30 call sites in this file.
 
 // ── Race detail page ──────────────────────────────────────────────────────────
 

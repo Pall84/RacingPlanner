@@ -1,12 +1,9 @@
 import { api } from "../api.js";
 import { renderCTLATLTSB, renderWeeklyVolume } from "../charts.js";
+import { fmtTime } from "../util.js";
 
+// Local: dashboard takes km already (from API aggregates), not m.
 function fmtDist(km) { return `${km.toFixed(1)} km`; }
-function fmtTime(sec) {
-  if (!sec) return "–";
-  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
-  return h > 0 ? `${h}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}` : `${m}:${String(s).padStart(2,"0")}`;
-}
 
 function tsbClass(tsb) {
   if (tsb === null || tsb === undefined) return "";
