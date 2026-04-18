@@ -44,13 +44,36 @@ async def sync_activities(
 
     new_count = 0
     page = 1
+    hit_rate_limit = False
     while True:
         if progress_queue:
             await progress_queue.put(f"Fetching activities page {page}...")
 
-        activities = await client.get_activities(
-            page=page, per_page=50, after=after_ts
-        )
+        try:
+            activities = await client.get_activities(
+                page=page, per_page=50, after=after_ts
+            )
+        except RuntimeError as e:
+            # Rate limiter raises RuntimeError with "rate limit" in the message.
+            # Treat this as end-of-sync rather than pipeline-crashing: the
+            # activities we already persisted are valid, and steps 5-9 should
+            # still run on that data. The next sync picks up where this one
+            # stopped via the `after_ts` filter.
+            if "rate limit" in str(e).lower():
+                hit_rate_limit = True
+                log.warning(
+                    "sync_activities hit rate limit at page %s for athlete %s — "
+                    "returning partial results (%s new so far)",
+                    page, athlete_id, new_count,
+                )
+                if progress_queue:
+                    await progress_queue.put(
+                        f"Strava rate limit reached after {new_count} new activities "
+                        f"(page {page}). Continuing with partial data; rerun sync in 15 min to fetch the rest."
+                    )
+                break
+            raise
+
         if not activities:
             break
 
@@ -65,7 +88,7 @@ async def sync_activities(
         await asyncio.sleep(0.1)  # Small courtesy delay between pages
 
     await db.flush()
-    if progress_queue:
+    if progress_queue and not hit_rate_limit:
         await progress_queue.put(f"Synced {new_count} new activities.")
     return new_count
 

@@ -85,6 +85,21 @@ async def full_sync(
             log.warning("Strava auth revoked for athlete %s — sync halted", athlete_id)
             await q.put("ERROR: Strava access was revoked. Please log out and log back in.")
             await q.put("DONE")
+        except RuntimeError as e:
+            # Rate-limiter errors mid-pipeline (e.g. during stream fetching)
+            # are expected — don't log as "crashed" and show a friendlier
+            # message than the generic exception branch.
+            if "rate limit" in str(e).lower():
+                log.warning("Rate limit hit during sync for athlete %s: %s", athlete_id, e)
+                await q.put(
+                    "WARNING: Strava rate limit reached. Partial sync complete — "
+                    "re-run sync in 15 min to finish."
+                )
+                await q.put("DONE")
+            else:
+                log.exception("Full sync pipeline crashed for athlete %s", athlete_id)
+                await q.put(f"ERROR: Pipeline failed: {type(e).__name__}: {e}")
+                await q.put("DONE")
         except Exception as e:  # noqa: BLE001
             log.exception("Full sync pipeline crashed for athlete %s", athlete_id)
             await q.put(f"ERROR: Pipeline failed: {type(e).__name__}: {e}")
