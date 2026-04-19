@@ -1,7 +1,17 @@
-// API client. In production the backend is on a different origin (Render),
-// so BASE is set via VITE_API_BASE at build time. In dev (Vite serving from
-// http://localhost:5173) it points at http://localhost:8000 by default.
-export const API_BASE = (import.meta.env.VITE_API_BASE || "http://localhost:8000").replace(/\/$/, "");
+// API client. Defaults to same-origin (empty BASE → relative URLs like
+// "/api/fitness/summary"). In production that goes to Netlify, which proxies
+// /api/* and /auth/* to the Render backend — see netlify.toml. The proxy
+// makes every request look first-party to the browser, which is how we
+// keep Safari's ITP from silently dropping the session cookie after OAuth.
+//
+// In local dev, Vite's dev server is configured with the same proxy (see
+// vite.config.js), so relative URLs forward to the local uvicorn.
+//
+// VITE_API_BASE can still be set explicitly to point at a specific backend
+// (useful for preview deploys or when testing a remote backend from local
+// frontend) — but production builds should leave it UNSET so relative URLs
+// are used.
+export const API_BASE = (import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "");
 
 async function apiFetch(path, options = {}) {
   const resp = await fetch(API_BASE + path, {
