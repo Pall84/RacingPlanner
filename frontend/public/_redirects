@@ -1,1 +1,14 @@
+# Order matters — Netlify processes this file top-to-bottom, first match wins.
+# This file also takes precedence over netlify.toml redirects, so the proxy
+# rules MUST be declared here too, not only in netlify.toml (where they were
+# previously shadowed by the SPA catchall below).
+
+# Backend proxy — forward /api/* and /auth/* to the Render API so cookies
+# are first-party on racingplanner.netlify.app (see netlify.toml for the
+# full Safari-ITP explanation). The `!` force flag makes the rule win
+# even against a shadow file, belt-and-suspenders.
+/api/*   https://racingplanner-api.onrender.com/api/:splat   200!
+/auth/*  https://racingplanner-api.onrender.com/auth/:splat  200!
+
+# SPA fallback — any path the client router should handle gets index.html.
 /*  /index.html  200

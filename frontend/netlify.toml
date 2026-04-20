@@ -19,8 +19,10 @@
 # browser's POV — cookies are scoped to racingplanner.netlify.app and
 # Safari treats them as first-party (stored, sent back reliably).
 #
-# IMPORTANT: these proxy rules must come BEFORE the SPA fallback below,
-# otherwise /api/* and /auth/* would match "/*" first and return index.html.
+# NOTE: these rules are effectively shadowed by `public/_redirects`
+# (Netlify processes _redirects first, then netlify.toml rules are appended
+# with first-match-wins). They're kept here for documentation and in case
+# _redirects is ever removed. The authoritative source is _redirects.
 [[redirects]]
   from = "/api/*"
   to = "https://racingplanner-api.onrender.com/api/:splat"
