@@ -99,7 +99,18 @@ async def sync_streams(db, activity_id: int, athlete_id: int, progress_queue=Non
 
     try:
         streams = await client.get_streams(activity_id)
-    except Exception as e:
+    except RuntimeError as e:
+        # Rate-limit RuntimeError must propagate so the batch orchestrator
+        # (sync_all_pending_streams) can set an abort flag and stop dispatching
+        # remaining activities. Previously this was swallowed, so every one of
+        # 500+ concurrent tasks hit the limit independently and spammed the
+        # SSE log with identical "rate limit reached" lines.
+        if "rate limit" in str(e).lower():
+            raise
+        if progress_queue:
+            await progress_queue.put(f"Stream error for {activity_id}: {e}")
+        return False
+    except Exception as e:  # noqa: BLE001
         if progress_queue:
             await progress_queue.put(f"Stream error for {activity_id}: {e}")
         return False
@@ -336,13 +347,41 @@ async def sync_all_pending_streams(db, athlete_id: int, progress_queue=None):
 
     semaphore = asyncio.Semaphore(3)
 
+    # Shared abort signal. When the first task sees a rate-limit error we
+    # set this event, and subsequent tasks short-circuit without even trying
+    # the HTTP call. Previously every one of the 500+ gathered tasks hit the
+    # rate limit independently and spammed one error line per activity.
+    rate_limited = asyncio.Event()
+    synced_count = 0
+
     async def _sync_one(activity_id: int):
+        nonlocal synced_count
+        # Cheap check BEFORE acquiring the semaphore — if we're already
+        # rate-limited, bail immediately without serializing behind the lock.
+        if rate_limited.is_set():
+            return
         async with semaphore:
+            # Re-check after acquiring — another task may have tripped the
+            # limit while we were waiting.
+            if rate_limited.is_set():
+                return
             async with SessionLocal() as own_db:
                 try:
                     await sync_streams(own_db, activity_id, athlete_id, progress_queue)
                     await own_db.commit()
-                except Exception as e:
+                    synced_count += 1
+                except RuntimeError as e:
+                    await own_db.rollback()
+                    if "rate limit" in str(e).lower() and not rate_limited.is_set():
+                        rate_limited.set()
+                        if progress_queue:
+                            await progress_queue.put(
+                                f"Strava rate limit reached after {synced_count} activities. "
+                                f"{len(pending_ids) - synced_count} remain — re-run Backfill in 15 min."
+                            )
+                    elif not rate_limited.is_set() and progress_queue:
+                        await progress_queue.put(f"Stream error for {activity_id}: {e}")
+                except Exception as e:  # noqa: BLE001
                     await own_db.rollback()
                     if progress_queue:
                         await progress_queue.put(f"Stream error for {activity_id}: {e}")
