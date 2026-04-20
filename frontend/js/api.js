@@ -91,6 +91,11 @@ export const api = {
   sync: {
     status: () => api.get("/api/sync/status"),
     full: () => api.post("/api/sync/full", {}),
+    // Re-runs steps 2-9 of the pipeline (streams, laps, metrics, fitness,
+    // weekly summaries, PRs, VO2max, Garmin) WITHOUT re-fetching the
+    // activity list from Strava. Use when activities are in the DB but
+    // streams/metrics are missing — e.g. after a rate-limited sync.
+    backfillDetails: () => api.post("/api/sync/backfill_details", {}),
     progressUrl: () => `${API_BASE}/api/sync/progress`,
   },
   garmin: {

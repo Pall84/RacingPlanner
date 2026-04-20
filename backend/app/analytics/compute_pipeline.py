@@ -220,8 +220,20 @@ async def run_full_pipeline(
     athlete_id: int,
     progress_queue: asyncio.Queue,
     full_sync: bool = False,
+    skip_activity_sync: bool = False,
 ):
-    """Run the complete sync + analysis pipeline."""
+    """Run the complete sync + analysis pipeline.
+
+    Flags:
+        full_sync: when True, paginate through every Strava activity rather
+            than only those newer than our latest synced start_date.
+        skip_activity_sync: when True, skip step 1 (don't hit Strava for the
+            activity list at all). Used by the "backfill details" button
+            when the user already has activities in the DB but streams/laps
+            were never fetched (e.g. previous sync aborted on rate limit).
+            This saves the most rate-limit-expensive step and only spends
+            budget on the streams + laps that are actually missing.
+    """
     # Load athlete to get per-athlete DB settings (overrides .env defaults)
     from app.models.schema import Athlete
     athlete_result = await db.execute(select(Athlete).where(Athlete.id == athlete_id))
@@ -231,9 +243,12 @@ async def run_full_pipeline(
     async def emit(msg: str):
         await progress_queue.put(msg)
 
-    await emit("Step 1/9: Syncing activities from Strava...")
-    new_count = await sync_activities(db, athlete_id, full_sync=full_sync, progress_queue=progress_queue)
-    await emit(f"Synced {new_count} new activities.")
+    if skip_activity_sync:
+        await emit("Step 1/9: Skipped (backfill mode — not fetching activity list).")
+    else:
+        await emit("Step 1/9: Syncing activities from Strava...")
+        new_count = await sync_activities(db, athlete_id, full_sync=full_sync, progress_queue=progress_queue)
+        await emit(f"Synced {new_count} new activities.")
 
     await emit("Step 2/9: Downloading activity streams...")
     await sync_all_pending_streams(db, athlete_id, progress_queue=progress_queue)

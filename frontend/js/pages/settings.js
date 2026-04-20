@@ -79,9 +79,19 @@ export async function render(container) {
             <div class="card"><div class="card-label">Metrics Pending</div><div class="card-value ${syncStatus.metrics_pending > 0 ? 'yellow' : 'green'}">${syncStatus.metrics_pending}</div></div>
           </div>
 
-          <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+          <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px">
             <button class="btn btn-primary" id="btn-sync-new">Sync New Activities</button>
             <button class="btn btn-secondary" id="btn-full-sync">Full Historical Sync</button>
+            <button class="btn btn-secondary" id="btn-backfill-details"
+                    ${syncStatus.streams_pending === 0 && syncStatus.metrics_pending === 0 ? "disabled" : ""}
+                    title="Re-run metrics + fitness on existing activities without hitting Strava's activity-list endpoint. Use when streams/laps are missing from a previous incomplete sync.">
+              Backfill Missing Details${syncStatus.streams_pending > 0 ? ` (${syncStatus.streams_pending})` : ""}
+            </button>
+          </div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:16px">
+            <strong>Backfill</strong> skips the activity-list fetch (the most rate-limited step) and only
+            re-pulls streams/laps for activities that are missing them. Runs through metrics, weekly
+            summaries, PRs, and VO2max on the updated data.
           </div>
 
           <div id="sync-log" style="display:none"></div>
@@ -236,6 +246,16 @@ export async function render(container) {
     await api.sync.full();
     startSSE(container);
   });
+
+  // Backfill missing details (streams/laps/metrics for activities already in DB)
+  const btnBackfill = container.querySelector("#btn-backfill-details");
+  if (btnBackfill) {
+    btnBackfill.addEventListener("click", async (e) => {
+      e.target.disabled = true;
+      await api.sync.backfillDetails();
+      startSSE(container);
+    });
+  }
 }
 
 function startSSE(container) {
