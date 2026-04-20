@@ -280,6 +280,16 @@ export function renderKmSplits(canvasId, splits) {
   const gaps = splits.map((s) => s.gap_sec_per_km);
   const hrs = splits.map((s) => s.avg_hr);
 
+  // Shared sec/km -> m:ss formatter for both axis ticks and tooltip.
+  // Without the tooltip formatter, Chart.js defaults to stringifying the
+  // raw seconds value ("Pace: 319") which users correctly read as wrong.
+  const fmtPaceAxis = (v) => {
+    if (v == null) return "–";
+    const m = Math.floor(v / 60);
+    const s = Math.round(v % 60);
+    return `${m}:${String(s).padStart(2, "0")}`;
+  };
+
   return new Chart(document.getElementById(canvasId), {
     data: {
       labels,
@@ -314,19 +324,28 @@ export function renderKmSplits(canvasId, splits) {
     },
     options: {
       responsive: true,
-      plugins: { legend: { labels: { color: "#e2e8f0", boxWidth: 16 } } },
+      plugins: {
+        legend: { labels: { color: "#e2e8f0", boxWidth: 16 } },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => {
+              const v = ctx.parsed.y;
+              if (v == null) return `${ctx.dataset.label}: –`;
+              // HR lives on y2 (plain bpm); Pace/GAP on y (seconds/km).
+              if (ctx.dataset.yAxisID === "y2") {
+                return `${ctx.dataset.label}: ${Math.round(v)} bpm`;
+              }
+              return `${ctx.dataset.label}: ${fmtPaceAxis(v)} /km`;
+            },
+          },
+        },
+      },
       scales: {
         x: { ticks: { color: "#8892a4" }, grid: { color: "#2e3348" } },
         y: {
           reverse: true,
           position: "left",
-          ticks: {
-            color: "#8892a4",
-            callback: (v) => {
-              const m = Math.floor(v / 60), s = Math.round(v % 60);
-              return `${m}:${String(s).padStart(2, "0")}`;
-            },
-          },
+          ticks: { color: "#8892a4", callback: fmtPaceAxis },
           grid: { color: "#2e3348" },
           title: { display: true, text: "pace /km", color: "#8892a4" },
         },
