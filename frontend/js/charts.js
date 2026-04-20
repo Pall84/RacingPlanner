@@ -114,24 +114,39 @@ export function renderPaceStream(canvasId, timeArr, velArr, gapVelArr = null) {
     });
   }
 
+  // Shared formatter for Y-axis ticks AND tooltip labels. Without this in
+  // the tooltip, Chart.js default formatting showed the raw seconds-per-km
+  // value (e.g. "Pace: 319") instead of "5:19 /km" — which reads as an
+  // "incorrect value" to anyone who expects a pace.
+  const fmtPaceAxis = (v) => {
+    if (!v) return "";
+    const m = Math.floor(v / 60);
+    const s = Math.round(v % 60);
+    return `${m}:${String(s).padStart(2, "0")}`;
+  };
+
   return new Chart(document.getElementById(canvasId), {
     type: "line",
     data: { labels: t, datasets },
     options: {
       responsive: true,
-      plugins: { legend: { labels: { color: "#e2e8f0", boxWidth: 16 } } },
+      plugins: {
+        legend: { labels: { color: "#e2e8f0", boxWidth: 16 } },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => {
+              const v = ctx.parsed.y;
+              return `${ctx.dataset.label}: ${v ? fmtPaceAxis(v) + " /km" : "–"}`;
+            },
+            title: (items) => (items[0] ? `${items[0].label} min` : ""),
+          },
+        },
+      },
       scales: {
         x: { ticks: { color: "#8892a4", maxTicksLimit: 8 }, grid: { color: "#2e3348" }, title: { display: true, text: "min", color: "#8892a4" } },
         y: {
           reverse: true,
-          ticks: {
-            color: "#8892a4",
-            callback: (v) => {
-              if (!v) return "";
-              const m = Math.floor(v / 60), s = Math.round(v % 60);
-              return `${m}:${String(s).padStart(2, "0")}`;
-            },
-          },
+          ticks: { color: "#8892a4", callback: fmtPaceAxis },
           grid: { color: "#2e3348" },
           title: { display: true, text: "pace /km", color: "#8892a4" },
         },

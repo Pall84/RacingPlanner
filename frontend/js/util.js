@@ -45,3 +45,45 @@ export function fmtPace(secPerKm) {
   const s = Math.round(secPerKm % 60);
   return `${m}:${String(s).padStart(2, "0")} /km`;
 }
+
+/**
+ * Client-side Minetti energy-cost-of-running formula.
+ *
+ * `gradeFrac` is slope as a decimal fraction (0.10 = 10% uphill). Returns
+ * J/kg/m. Clamped to ±45% to mirror the backend's clamp in
+ * app/analytics/metrics_engine.py::_minetti_cost (kept byte-for-byte
+ * identical so per-sample client GAP matches stored per-activity avg GAP).
+ */
+function minettiCost(gradeFrac) {
+  const g = Math.max(-0.45, Math.min(0.45, gradeFrac));
+  return (
+    155.4 * g ** 5
+    - 30.4 * g ** 4
+    - 43.3 * g ** 3
+    + 46.3 * g ** 2
+    + 19.5 * g
+    + 3.6
+  );
+}
+
+const FLAT_COST = 3.6;
+
+/**
+ * Convert raw velocity + grade streams into grade-adjusted velocity (m/s).
+ * Returns null if input lengths don't match (caller should skip GAP overlay).
+ * Mirrors compute_gap_speeds() in app/analytics/metrics_engine.py.
+ */
+export function computeGapVelocity(velArr, gradePctArr) {
+  if (!velArr || !gradePctArr || velArr.length !== gradePctArr.length) {
+    return null;
+  }
+  const n = velArr.length;
+  const out = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const g = (gradePctArr[i] || 0) / 100;
+    const cost = minettiCost(g);
+    const effective = cost > 0 ? cost : FLAT_COST;
+    out[i] = velArr[i] * (FLAT_COST / effective);
+  }
+  return out;
+}

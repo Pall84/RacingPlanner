@@ -1,5 +1,5 @@
 import { api } from "../api.js";
-import { escapeHtml, fmtTime, fmtPace } from "../util.js";
+import { escapeHtml, fmtTime, fmtPace, computeGapVelocity } from "../util.js";
 import {
   renderZoneChart, renderHRStream, renderPaceStream,
   renderKmSplits, renderCadenceHistogram, renderPowerStream,
@@ -30,6 +30,7 @@ export async function render(container, activityId) {
   const date = (activity.start_date_local || activity.start_date || "").slice(0, 10);
   const timeStreams = streams.time || [];
   const velStreams = streams.velocity_smooth || [];
+  const gradeStreams = streams.grade_smooth || [];
   const hrStreams = streams.heartrate || [];
   const cadStreams = streams.cadence || [];
   const wattsStreams = streams.watts || [];
@@ -267,7 +268,11 @@ export async function render(container, activityId) {
   }
 
   if (velStreams.length > 0) {
-    renderPaceStream("pace-chart", timeStreams, velStreams);
+    // Compute per-sample GAP velocity so the chart overlays a second line.
+    // Skipped when grade data is missing (e.g. treadmill runs) — the fn
+    // returns null and renderPaceStream falls back to a Pace-only chart.
+    const gapVelStreams = computeGapVelocity(velStreams, gradeStreams);
+    renderPaceStream("pace-chart", timeStreams, velStreams, gapVelStreams);
   }
 
   if (cadStreams.length > 0) {
